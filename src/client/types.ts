@@ -90,6 +90,7 @@ export interface Approval {
     arbzg_check?: string;
     remaining_vacation?: string;
     team_availability?: string;
+    team_conflict_warning?: string | null;
   };
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   decision_note?: string | null;
@@ -101,6 +102,26 @@ export interface Approval {
   requester_avatar: string;
   target_name?: string | null;
   target_role?: Role | null;
+}
+
+export interface ShiftTemplate {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  break_minutes: number;
+  color: string;
+}
+
+export interface StaffWish {
+  id: string;
+  staff_id: string;
+  date: string;
+  type: 'WUNSCH_FRUEH' | 'WUNSCH_SPAET' | 'WUNSCH_FREI' | 'VERFUEGBAR_AB';
+  note?: string;
+  created_at: string;
+  staff_name?: string;
+  staff_role?: Role;
 }
 
 export interface OvertimeAdjustment {

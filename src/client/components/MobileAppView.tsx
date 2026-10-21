@@ -19,7 +19,8 @@ import {
   Shield,
   FileText,
   Bell,
-  TrendingUp
+  TrendingUp,
+  Lightbulb
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -60,6 +61,12 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   const [vacEnd, setVacEnd] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [vacReason, setVacReason] = useState<string>('Erholungsurlaub');
   const [vacSuccessMsg, setVacSuccessMsg] = useState<string | null>(null);
+
+  // Staff Wish Form State (Competitor Best Practice)
+  const [wishDate, setWishDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [wishType, setWishType] = useState<'WUNSCH_FRUEH' | 'WUNSCH_SPAET' | 'WUNSCH_FREI'>('WUNSCH_FRUEH');
+  const [wishNote, setWishNote] = useState<string>('');
+  const [wishSuccessMsg, setWishSuccessMsg] = useState<string | null>(null);
 
   const currentUser = staffList.find(s => s.id === currentStaffId) || staffList[0];
   const todayStr = format(new Date(), 'yyyy-MM-dd');
@@ -126,6 +133,25 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
     setVacSuccessMsg('Urlaubsantrag eingereicht! Wartet auf Freigabe der Leitung.');
     setTimeout(() => setVacSuccessMsg(null), 4000);
+  };
+
+  const handleSendWish = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch('/api/staff-wishes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staff_id: currentStaffId,
+        date: wishDate,
+        type: wishType,
+        note: wishNote
+      })
+    });
+    if (res.ok) {
+      setWishSuccessMsg('Wunschdienst eingereicht! Die Leitung sieht ihn bei der Schichtplanung.');
+      setWishNote('');
+      setTimeout(() => setWishSuccessMsg(null), 4000);
+    }
   };
 
   const unreadChangesCount = auditLogs.filter(l => l.is_read === 0).length;
@@ -474,6 +500,63 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                       className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl"
                     >
                       Urlaub verbindlich einreichen
+                    </button>
+                  </form>
+                </div>
+
+                {/* 3. Wunschdienst einreichen (Competitor Best Practice) */}
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                  <h4 className="font-bold text-xs text-slate-900 mb-2 flex items-center space-x-1.5">
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Wunschdienst / Verfügbarkeit hinterlegen</span>
+                  </h4>
+
+                  {wishSuccessMsg && (
+                    <div className="p-2 mb-2 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg font-medium">
+                      ✓ {wishSuccessMsg}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSendWish} className="space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-slate-500 mb-0.5">Datum</label>
+                        <input
+                          type="date"
+                          value={wishDate}
+                          onChange={(e) => setWishDate(e.target.value)}
+                          className="w-full text-xs p-2 border border-slate-300 rounded-xl bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-slate-500 mb-0.5">Schichtwunsch</label>
+                        <select
+                          value={wishType}
+                          onChange={(e) => setWishType(e.target.value as any)}
+                          className="w-full text-xs p-2 border border-slate-300 rounded-xl bg-white"
+                        >
+                          <option value="WUNSCH_FRUEH">🌅 Frühdienst (ab 07:00)</option>
+                          <option value="WUNSCH_SPAET">🌇 Spätdienst (bis 17:00)</option>
+                          <option value="WUNSCH_FREI">🚫 Wunschfrei / Zeitausgleich</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <input
+                        type="text"
+                        placeholder="Begründung (z.B. Arzttermin, Fortbildung...)"
+                        value={wishNote}
+                        onChange={(e) => setWishNote(e.target.value)}
+                        className="w-full text-xs p-2 border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-95"
+                    >
+                      Schichtwunsch für Leitung hinterlegen
                     </button>
                   </form>
                 </div>

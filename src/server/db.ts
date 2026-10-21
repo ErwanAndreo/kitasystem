@@ -145,7 +145,40 @@ export function initDb() {
       is_read INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS staff_wishes (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
   `);
+
+  // Populate standard Kita shift templates
+  const insertTemplate = db.prepare(`
+    INSERT OR REPLACE INTO shift_templates (id, name, start_time, end_time, break_minutes, color)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  insertTemplate.run('tpl_fd', 'Frühdienst (FD)', '07:00', '15:30', 30, '#f59e0b');
+  insertTemplate.run('tpl_md', 'Mitteldienst (MD)', '08:00', '16:30', 30, '#10b981');
+  insertTemplate.run('tpl_sd', 'Spätdienst (SD)', '08:30', '17:00', 30, '#6366f1');
+  insertTemplate.run('tpl_vz', 'Verfügungszeit (VZ)', '13:30', '16:30', 15, '#8b5cf6');
+  insertTemplate.run('tpl_tz', 'Teilzeit-Vormittag (TZ)', '08:00', '12:30', 0, '#06b6d4');
+
+  // Seed sample staff wishes for current week
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const thisFriday = format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 4), 'yyyy-MM-dd');
+  const thisWednesday = format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 2), 'yyyy-MM-dd');
+
+  db.prepare(`
+    INSERT OR IGNORE INTO staff_wishes (id, staff_id, date, type, note, created_at)
+    VALUES 
+      ('w_1', 's_elena', ?, 'WUNSCH_FRUEH', 'Bitte Frühdienst wegen Facharzt-Termin ab 16:30 Uhr', ?),
+      ('w_2', 's_markus', ?, 'WUNSCH_SPAET', 'Fahrgemeinschaft morgens, lieber Spätdienst', ?)
+  `).run(thisFriday, new Date().toISOString(), thisWednesday, new Date().toISOString());
 
   // Migrate columns if needed
   try { db.prepare("ALTER TABLE staff ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}

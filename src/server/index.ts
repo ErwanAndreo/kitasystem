@@ -567,8 +567,67 @@ app.get('/api/emergency/suggestions', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. SHIFTS & DIENSTPLAN
+// 5. SHIFTS & DIENSTPLAN & TEMPLATES & WISHES
 // ---------------------------------------------------------------------------
+app.get('/api/shift-templates', (req, res) => {
+  try {
+    const templates = db.prepare('SELECT * FROM shift_templates ORDER BY start_time ASC').all();
+    res.json(templates);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/staff-wishes', (req, res) => {
+  try {
+    const { start, end, staff_id } = req.query;
+    let query = `
+      SELECT w.*, s.name as staff_name, s.role as staff_role
+      FROM staff_wishes w
+      JOIN staff s ON w.staff_id = s.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (start && end) {
+      query += ` AND w.date BETWEEN ? AND ?`;
+      params.push(start, end);
+    }
+    if (staff_id) {
+      query += ` AND w.staff_id = ?`;
+      params.push(staff_id);
+    }
+    query += ` ORDER BY w.date ASC`;
+    const wishes = db.prepare(query).all(...params);
+    res.json(wishes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/staff-wishes', (req, res) => {
+  try {
+    const { staff_id, date, type, note } = req.body;
+    const id = 'wish_' + Date.now();
+    db.prepare(`
+      INSERT INTO staff_wishes (id, staff_id, date, type, note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, staff_id, date, type, note || '', new Date().toISOString());
+
+    res.status(201).json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/staff-wishes/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM staff_wishes WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/shifts', (req, res) => {
   try {
     const { start, end, group_id, staff_id } = req.query;
@@ -801,6 +860,28 @@ app.post('/api/approvals/request-vacation', (req, res) => {
   try {
     const { requester_id, start_date, end_date, reason } = req.body;
     const requesterStaff = db.prepare('SELECT * FROM staff WHERE id = ?').get(requester_id) as any;
+    if (!requesterStaff) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
+
+    // Team Vacation Conflict Check (Urlaubs-Kollisionsprüfung)
+    let conflictWarning = null;
+    if (requesterStaff.target_group_id) {
+      const conflicts = db.prepare(`
+        SELECT a.*, s.name as staff_name, s.role, s.is_fachkraft
+        FROM absences a
+        JOIN staff s ON a.staff_id = s.id
+        WHERE s.target_group_id = ? AND s.id != ? AND a.status = 'APPROVED'
+          AND (
+            (a.start_date BETWEEN ? AND ?) OR
+            (a.end_date BETWEEN ? AND ?) OR
+            (? BETWEEN a.start_date AND a.end_date)
+          )
+      `).all(requesterStaff.target_group_id, requester_id, start_date, end_date, start_date, end_date, start_date) as any[];
+
+      if (conflicts.length > 0) {
+        const names = conflicts.map((c: any) => c.staff_name).join(', ');
+        conflictWarning = `⚠️ Urlaubs-Kollision: ${names} aus der Gruppe '${requesterStaff.target_group_id}' hat im selben Zeitraum bereits genehmigten Urlaub!`;
+      }
+    }
 
     const id = 'appr_vac_' + Date.now();
     const details = {
@@ -809,7 +890,8 @@ app.post('/api/approvals/request-vacation', (req, res) => {
       start_date,
       end_date,
       reason: reason || 'Erholungsurlaub',
-      remaining_vacation: '24 Tage'
+      remaining_vacation: `${requesterStaff.annual_vacation_days - 6} Tage`,
+      team_conflict_warning: conflictWarning
     };
 
     db.prepare(`
@@ -817,7 +899,7 @@ app.post('/api/approvals/request-vacation', (req, res) => {
       VALUES (?, 'VACATION_REQUEST', ?, ?, 'PENDING', ?)
     `).run(id, requester_id, JSON.stringify(details), new Date().toISOString());
 
-    res.status(201).json({ success: true, id });
+    res.status(201).json({ success: true, id, conflictWarning });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

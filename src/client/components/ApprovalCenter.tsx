@@ -7,6 +7,7 @@ import {
   ArrowRightLeft, 
   Palmtree, 
   AlertOctagon, 
+  AlertTriangle,
   ShieldCheck, 
   MessageSquare,
   User,
@@ -176,6 +177,14 @@ export const ApprovalCenter: React.FC<ApprovalCenterProps> = ({ approvals, onDec
                       <p className="text-xs text-slate-700 font-medium">
                         {appr.details.description}
                       </p>
+
+                      {/* Team Vacation Conflict Warning */}
+                      {appr.details.team_conflict_warning && (
+                        <div className="p-2 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs font-semibold flex items-center space-x-1.5 mt-1.5">
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                          <span>{appr.details.team_conflict_warning}</span>
+                        </div>
+                      )}
 
                       {/* Safety / Compliance Checks */}
                       <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
