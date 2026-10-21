@@ -160,6 +160,51 @@ class ApiService {
     return _mockAuditLogs(staffId);
   }
 
+  static Future<List<StaffWishModel>> getStaffWishes({String? staffId}) async {
+    try {
+      String url = '$baseUrl/staff-wishes';
+      if (staffId != null) url += '?staff_id=$staffId';
+      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        return data.map((e) => StaffWishModel.fromJson(e)).toList();
+      }
+    } catch (_) {}
+    return _mockWishes(staffId);
+  }
+
+  static Future<bool> requestWish({
+    required String staffId,
+    required String date,
+    required String type,
+    String? note,
+  }) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/staff-wishes'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'staff_id': staffId,
+          'date': date,
+          'type': type,
+          'note': note,
+        }),
+      ).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<bool> deleteWish(String wishId) async {
+    try {
+      final res = await http.delete(Uri.parse('$baseUrl/staff-wishes/$wishId')).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return true;
+    }
+  }
+
   // --- MOCK FALLBACK DATA ---
   static List<StaffModel> _mockStaff() {
     return [
@@ -266,6 +311,20 @@ class ApiService {
         changedBy: 'Sabine Weber (Leitung)',
         createdAt: DateTime.now().subtract(const Duration(hours: 12)).toIso8601String(),
         isRead: false,
+      ),
+    ];
+  }
+
+  static List<StaffWishModel> _mockWishes(String? staffId) {
+    return [
+      StaffWishModel(
+        id: 'wish_mock_1',
+        staffId: staffId ?? 's_lukas',
+        date: '2026-10-23',
+        type: 'WUNSCH_FRUEH',
+        note: 'Facharzttermin um 16:30 Uhr',
+        createdAt: DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
+        staffName: 'Lukas Wagner',
       ),
     ];
   }

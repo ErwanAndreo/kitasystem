@@ -275,3 +275,35 @@ class AuditLogModel {
     );
   }
 }
+
+class StaffWishModel {
+  final String id;
+  final String staffId;
+  final String date;
+  final String type; // WUNSCH_FRUEH, WUNSCH_SPAET, WUNSCH_FREI
+  final String? note;
+  final String createdAt;
+  final String? staffName;
+
+  StaffWishModel({
+    required this.id,
+    required this.staffId,
+    required this.date,
+    required this.type,
+    this.note,
+    required this.createdAt,
+    this.staffName,
+  });
+
+  factory StaffWishModel.fromJson(Map<String, dynamic> json) {
+    return StaffWishModel(
+      id: json['id'] ?? '',
+      staffId: json['staff_id'] ?? '',
+      date: json['date'] ?? '',
+      type: json['type'] ?? '',
+      note: json['note'],
+      createdAt: json['created_at'] ?? '',
+      staffName: json['staff_name'],
+    );
+  }
+}

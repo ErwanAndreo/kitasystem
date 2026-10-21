@@ -16,6 +16,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
   List<ApprovalModel> _approvals = [];
   List<StaffModel> _allStaff = [];
   List<ShiftModel> _userShifts = [];
+  List<StaffWishModel> _userWishes = [];
   bool _loading = true;
 
   @override
@@ -30,6 +31,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
       ApiService.getApprovals(),
       ApiService.getStaff(),
       ApiService.getShifts(staffId: widget.currentUser.id),
+      ApiService.getStaffWishes(staffId: widget.currentUser.id),
     ]);
 
     if (mounted) {
@@ -37,9 +39,122 @@ class _RequestsScreenState extends State<RequestsScreen> {
         _approvals = results[0] as List<ApprovalModel>;
         _allStaff = results[1] as List<StaffModel>;
         _userShifts = results[2] as List<ShiftModel>;
+        _userWishes = results[3] as List<StaffWishModel>;
         _loading = false;
       });
     }
+  }
+
+  void _openWishDialog() {
+    DateTime selectedDate = DateTime.now().add(const Duration(days: 2));
+    String selectedType = 'WUNSCH_FRUEH';
+    final noteController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Schichtwunsch einreichen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              const Text('Wunschdienste werden der Einrichtungsleitung direkt im Dienstplaner angezeigt.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+              const SizedBox(height: 16),
+
+              const Text('Datum des Wunschdienstes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.calendar_today, size: 16),
+                label: Text(DateFormat('dd.MM.yyyy').format(selectedDate)),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: selectedDate,
+                    firstDate: DateTime.now(),
+                    lastDate: DateTime.now().add(const Duration(days: 90)),
+                  );
+                  if (picked != null) {
+                    setSheetState(() => selectedDate = picked);
+                  }
+                },
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
+                  alignment: Alignment.centerLeft,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              const Text('Art des Wunsches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                initialValue: selectedType,
+                items: const [
+                  DropdownMenuItem(value: 'WUNSCH_FRUEH', child: Text('🌅 Frühdienst (7:30 - 15:30)')),
+                  DropdownMenuItem(value: 'WUNSCH_SPAET', child: Text('🌆 Spätdienst (8:30 - 17:30)')),
+                  DropdownMenuItem(value: 'WUNSCH_FREI', child: Text('🚫 Wunschfrei (Ruhetag / Termin)')),
+                ],
+                onChanged: (val) => setSheetState(() => selectedType = val ?? 'WUNSCH_FRUEH'),
+                decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+              ),
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: noteController,
+                decoration: InputDecoration(
+                  labelText: 'Begründung / Notiz (optional)',
+                  hintText: 'z.B. Wichtiger Facharzttermin...',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.pop(ctx);
+                    await ApiService.requestWish(
+                      staffId: widget.currentUser.id,
+                      date: DateFormat('yyyy-MM-dd').format(selectedDate),
+                      type: selectedType,
+                      note: noteController.text,
+                    );
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Schichtwunsch hinterlegt! Leitung sieht diesen bei der Planung.'),
+                        backgroundColor: Color(0xFF4F46E5),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                    _loadData();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4F46E5),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Wunschdienst einreichen', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _openSwapDialog() {
@@ -329,7 +444,21 @@ class _RequestsScreenState extends State<RequestsScreen> {
                           onTap: _openSwapDialog,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _buildActionTile(
+                          icon: Icons.event_available,
+                          label: 'Wunschdienst\nhinterlegen',
+                          color: const Color(0xFF4F46E5),
+                          bg: const Color(0xFFEEF2FF),
+                          onTap: _openWishDialog,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
                       Expanded(
                         child: _buildActionTile(
                           icon: Icons.beach_access,
@@ -339,7 +468,7 @@ class _RequestsScreenState extends State<RequestsScreen> {
                           onTap: _openVacationDialog,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: _buildActionTile(
                           icon: Icons.sick,
@@ -351,6 +480,92 @@ class _RequestsScreenState extends State<RequestsScreen> {
                       ),
                     ],
                   ),
+                  if (_userWishes.isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Meine Schichtwünsche',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        ),
+                        Text(
+                          '${_userWishes.length} aktiv',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ..._userWishes.map((w) {
+                      final isFrueh = w.type == 'WUNSCH_FRUEH';
+                      final isSpaet = w.type == 'WUNSCH_SPAET';
+                      final typeLabel = isFrueh
+                          ? '🌅 Frühdienst'
+                          : isSpaet
+                              ? '🌆 Spätdienst'
+                              : '🚫 Wunschfrei';
+                      final chipBg = isFrueh
+                          ? const Color(0xFFFEF3C7)
+                          : isSpaet
+                              ? const Color(0xFFE0E7FF)
+                              : const Color(0xFFFEE2E2);
+                      final chipColor = isFrueh
+                          ? const Color(0xFFB45309)
+                          : isSpaet
+                              ? const Color(0xFF4338CA)
+                              : const Color(0xFFB91C1C);
+
+                      DateTime? parsedDate = DateTime.tryParse(w.date);
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(color: chipBg, borderRadius: BorderRadius.circular(8)),
+                              child: Text(typeLabel, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: chipColor)),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    parsedDate != null ? DateFormat('dd.MM.yyyy').format(parsedDate) : w.date,
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                  ),
+                                  if (w.note != null && w.note!.isNotEmpty)
+                                    Text(w.note!, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFF94A3B8)),
+                              onPressed: () async {
+                                final messenger = ScaffoldMessenger.of(context);
+                                await ApiService.deleteWish(w.id);
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Schichtwunsch entfernt.'),
+                                    duration: Duration(seconds: 2),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                                _loadData();
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
                   const SizedBox(height: 20),
 
                   Row(

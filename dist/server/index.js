@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDb } from './db.js';
 import { format } from 'date-fns';
@@ -10,8 +11,67 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
+// Request logging middleware
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = Date.now() - start;
+        if (req.path.startsWith('/api')) {
+            console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
+        }
+    });
+    next();
+});
 // Initialize SQLite database
 initDb();
+// ---------------------------------------------------------------------------
+// 0. HEALTH CHECK & SYSTEM DIAGNOSTICS
+// ---------------------------------------------------------------------------
+app.get('/api/health', (req, res) => {
+    try {
+        const dbCheck = db.prepare('SELECT 1 as ok').get();
+        const staffCount = db.prepare('SELECT COUNT(*) as count FROM staff WHERE is_active = 1').get();
+        const shiftsCount = db.prepare('SELECT COUNT(*) as count FROM shifts WHERE date = ?').get(format(new Date(), 'yyyy-MM-dd'));
+        res.json({
+            status: 'UP',
+            timestamp: new Date().toISOString(),
+            uptime_seconds: Math.floor(process.uptime()),
+            database: {
+                engine: 'SQLite3 (WAL mode)',
+                connected: dbCheck?.ok === 1,
+                active_staff: staffCount.count,
+                shifts_today: shiftsCount.count
+            },
+            system: {
+                node_version: process.version,
+                memory_usage_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+                platform: process.platform
+            }
+        });
+    }
+    catch (err) {
+        res.status(503).json({
+            status: 'DOWN',
+            error: err.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+// Hot live backup of SQLite database without locking
+app.post('/api/admin/backup', async (req, res) => {
+    try {
+        const backupDir = path.resolve(__dirname, '../../backups');
+        if (!fs.existsSync(backupDir)) {
+            fs.mkdirSync(backupDir, { recursive: true });
+        }
+        const backupPath = path.join(backupDir, `kita_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.sqlite`);
+        await db.backup(backupPath);
+        res.json({ success: true, backupPath, timestamp: new Date().toISOString() });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 // ---------------------------------------------------------------------------
 // 1. STAFF MANAGEMENT (ACCOUNTS, CONTRACTS, SKILLS & SECONDARY ROLES)
 // ---------------------------------------------------------------------------
@@ -26,12 +86,187 @@ app.get('/api/staff', (req, res) => {
       FROM staff s
       WHERE s.is_active = 1
       ORDER BY s.role = 'LEITUNG' DESC, s.name ASC
-    `).all(today, today).map((s) => ({
-            ...s,
-            skills: JSON.parse(s.skills || '[]'),
-            secondary_roles: JSON.parse(s.secondary_roles || '[]')
-        }));
+    `).all(today, today).map((s) => {
+            const certs = db.prepare('SELECT * FROM staff_certifications WHERE staff_id = ? ORDER BY expires_at ASC').all(s.id).map((c) => {
+                const expDate = new Date(c.expires_at);
+                const nowDate = new Date(today);
+                const diffDays = Math.ceil((expDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24));
+                return {
+                    ...c,
+                    days_until_expiry: diffDays,
+                    is_expired: diffDays < 0,
+                    expires_soon: diffDays >= 0 && diffDays <= 60
+                };
+            });
+            return {
+                ...s,
+                skills: JSON.parse(s.skills || '[]'),
+                secondary_roles: JSON.parse(s.secondary_roles || '[]'),
+                certifications: certs
+            };
+        });
         res.json(staffList);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// 1.1 QUALIFICATIONS & CERTIFICATIONS EXPIRY TRACKING
+app.get('/api/certifications', (req, res) => {
+    try {
+        const { staff_id } = req.query;
+        let query = `
+      SELECT c.*, s.name as staff_name, s.role as staff_role
+      FROM staff_certifications c
+      JOIN staff s ON c.staff_id = s.id
+      WHERE 1=1
+    `;
+        const params = [];
+        if (staff_id) {
+            query += ` AND c.staff_id = ?`;
+            params.push(staff_id);
+        }
+        query += ` ORDER BY c.expires_at ASC`;
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const certs = db.prepare(query).all(...params).map((c) => {
+            const expDate = new Date(c.expires_at);
+            const nowDate = new Date(today);
+            const diffDays = Math.ceil((expDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24));
+            return {
+                ...c,
+                days_until_expiry: diffDays,
+                is_expired: diffDays < 0,
+                expires_soon: diffDays >= 0 && diffDays <= 60
+            };
+        });
+        res.json(certs);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.get('/api/certifications/alerts', (req, res) => {
+    try {
+        const today = format(new Date(), 'yyyy-MM-dd');
+        const certs = db.prepare(`
+      SELECT c.*, s.name as staff_name, s.role as staff_role
+      FROM staff_certifications c
+      JOIN staff s ON c.staff_id = s.id
+      WHERE c.expires_at <= date(?, '+60 days')
+      ORDER BY c.expires_at ASC
+    `).all(today).map((c) => {
+            const expDate = new Date(c.expires_at);
+            const nowDate = new Date(today);
+            const diffDays = Math.ceil((expDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24));
+            return {
+                ...c,
+                days_until_expiry: diffDays,
+                is_expired: diffDays < 0,
+                expires_soon: diffDays >= 0 && diffDays <= 60
+            };
+        });
+        res.json(certs);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.post('/api/certifications', (req, res) => {
+    try {
+        const { staff_id, type, title, issue_date, expires_at, institution, notes } = req.body;
+        const id = 'cert_' + Date.now();
+        db.prepare(`
+      INSERT INTO staff_certifications (id, staff_id, type, title, issue_date, expires_at, institution, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, staff_id, type, title, issue_date || null, expires_at, institution || '', notes || '');
+        res.status(201).json({ success: true, id });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.put('/api/certifications/:id', (req, res) => {
+    try {
+        const { type, title, issue_date, expires_at, institution, notes } = req.body;
+        db.prepare(`
+      UPDATE staff_certifications SET 
+        type = ?, title = ?, issue_date = ?, expires_at = ?, institution = ?, notes = ?
+      WHERE id = ?
+    `).run(type, title, issue_date || null, expires_at, institution || '', notes || '', req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.delete('/api/certifications/:id', (req, res) => {
+    try {
+        db.prepare('DELETE FROM staff_certifications WHERE id = ?').run(req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+// 1.2 ONENOTE-STYLE DIRECTOR NOTEBOOK
+app.get('/api/director-notes', (req, res) => {
+    try {
+        const { category, search } = req.query;
+        let query = `SELECT * FROM director_notes WHERE 1=1`;
+        const params = [];
+        if (category && category !== 'ALL') {
+            query += ` AND category = ?`;
+            params.push(category);
+        }
+        if (search) {
+            query += ` AND (title LIKE ? OR content LIKE ?)`;
+            params.push(`%${search}%`, `%${search}%`);
+        }
+        query += ` ORDER BY is_pinned DESC, updated_at DESC`;
+        const notes = db.prepare(query).all(...params).map((n) => ({
+            ...n,
+            checklist: JSON.parse(n.checklist || '[]')
+        }));
+        res.json(notes);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.post('/api/director-notes', (req, res) => {
+    try {
+        const { category, title, content, color, is_pinned, checklist } = req.body;
+        const id = 'note_' + Date.now();
+        const now = new Date().toISOString();
+        db.prepare(`
+      INSERT INTO director_notes (id, category, title, content, color, is_pinned, checklist, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, category || 'ALLGEMEIN', title || 'Neue Notiz', content || '', color || '#fef08a', is_pinned ? 1 : 0, JSON.stringify(checklist || []), now, now);
+        res.status(201).json({ success: true, id });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.put('/api/director-notes/:id', (req, res) => {
+    try {
+        const { category, title, content, color, is_pinned, checklist } = req.body;
+        const now = new Date().toISOString();
+        db.prepare(`
+      UPDATE director_notes SET
+        category = ?, title = ?, content = ?, color = ?, is_pinned = ?, checklist = ?, updated_at = ?
+      WHERE id = ?
+    `).run(category || 'ALLGEMEIN', title, content || '', color || '#fef08a', is_pinned ? 1 : 0, JSON.stringify(checklist || []), now, req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.delete('/api/director-notes/:id', (req, res) => {
+    try {
+        db.prepare('DELETE FROM director_notes WHERE id = ?').run(req.params.id);
+        res.json({ success: true });
     }
     catch (err) {
         res.status(500).json({ error: err.message });
@@ -437,8 +672,66 @@ app.get('/api/emergency/suggestions', (req, res) => {
     }
 });
 // ---------------------------------------------------------------------------
-// 5. SHIFTS & DIENSTPLAN
+// 5. SHIFTS & DIENSTPLAN & TEMPLATES & WISHES
 // ---------------------------------------------------------------------------
+app.get('/api/shift-templates', (req, res) => {
+    try {
+        const templates = db.prepare('SELECT * FROM shift_templates ORDER BY start_time ASC').all();
+        res.json(templates);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.get('/api/staff-wishes', (req, res) => {
+    try {
+        const { start, end, staff_id } = req.query;
+        let query = `
+      SELECT w.*, s.name as staff_name, s.role as staff_role
+      FROM staff_wishes w
+      JOIN staff s ON w.staff_id = s.id
+      WHERE 1=1
+    `;
+        const params = [];
+        if (start && end) {
+            query += ` AND w.date BETWEEN ? AND ?`;
+            params.push(start, end);
+        }
+        if (staff_id) {
+            query += ` AND w.staff_id = ?`;
+            params.push(staff_id);
+        }
+        query += ` ORDER BY w.date ASC`;
+        const wishes = db.prepare(query).all(...params);
+        res.json(wishes);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.post('/api/staff-wishes', (req, res) => {
+    try {
+        const { staff_id, date, type, note } = req.body;
+        const id = 'wish_' + Date.now();
+        db.prepare(`
+      INSERT INTO staff_wishes (id, staff_id, date, type, note, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, staff_id, date, type, note || '', new Date().toISOString());
+        res.status(201).json({ success: true, id });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+app.delete('/api/staff-wishes/:id', (req, res) => {
+    try {
+        db.prepare('DELETE FROM staff_wishes WHERE id = ?').run(req.params.id);
+        res.json({ success: true });
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 app.get('/api/shifts', (req, res) => {
     try {
         const { start, end, group_id, staff_id } = req.query;
@@ -636,6 +929,27 @@ app.post('/api/approvals/request-vacation', (req, res) => {
     try {
         const { requester_id, start_date, end_date, reason } = req.body;
         const requesterStaff = db.prepare('SELECT * FROM staff WHERE id = ?').get(requester_id);
+        if (!requesterStaff)
+            return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
+        // Team Vacation Conflict Check (Urlaubs-Kollisionsprüfung)
+        let conflictWarning = null;
+        if (requesterStaff.target_group_id) {
+            const conflicts = db.prepare(`
+        SELECT a.*, s.name as staff_name, s.role, s.is_fachkraft
+        FROM absences a
+        JOIN staff s ON a.staff_id = s.id
+        WHERE s.target_group_id = ? AND s.id != ? AND a.status = 'APPROVED'
+          AND (
+            (a.start_date BETWEEN ? AND ?) OR
+            (a.end_date BETWEEN ? AND ?) OR
+            (? BETWEEN a.start_date AND a.end_date)
+          )
+      `).all(requesterStaff.target_group_id, requester_id, start_date, end_date, start_date, end_date, start_date);
+            if (conflicts.length > 0) {
+                const names = conflicts.map((c) => c.staff_name).join(', ');
+                conflictWarning = `⚠️ Urlaubs-Kollision: ${names} aus der Gruppe '${requesterStaff.target_group_id}' hat im selben Zeitraum bereits genehmigten Urlaub!`;
+            }
+        }
         const id = 'appr_vac_' + Date.now();
         const details = {
             title: `Urlaubsantrag: ${requesterStaff.name}`,
@@ -643,13 +957,14 @@ app.post('/api/approvals/request-vacation', (req, res) => {
             start_date,
             end_date,
             reason: reason || 'Erholungsurlaub',
-            remaining_vacation: '24 Tage'
+            remaining_vacation: `${requesterStaff.annual_vacation_days - 6} Tage`,
+            team_conflict_warning: conflictWarning
         };
         db.prepare(`
       INSERT INTO approvals (id, type, requester_id, details, status, created_at)
       VALUES (?, 'VACATION_REQUEST', ?, ?, 'PENDING', ?)
     `).run(id, requester_id, JSON.stringify(details), new Date().toISOString());
-        res.status(201).json({ success: true, id });
+        res.status(201).json({ success: true, id, conflictWarning });
     }
     catch (err) {
         res.status(500).json({ error: err.message });
@@ -873,6 +1188,37 @@ app.get('*', (req, res) => {
         }
     });
 });
-app.listen(PORT, () => {
-    console.log(`🚀 KitaPlaner Backend running at http://localhost:${PORT}`);
+// Global Error Handling Middleware
+app.use((err, req, res, next) => {
+    console.error(`[ERROR] Unhandled error on ${req.method} ${req.path}:`, err);
+    res.status(500).json({
+        error: 'Interner Serverfehler',
+        message: err?.message || 'Unerwarteter Fehler'
+    });
 });
+const server = app.listen(PORT, () => {
+    console.log(`🚀 KitaPlaner Backend running at http://localhost:${PORT}`);
+    console.log(`🩺 Healthcheck: http://localhost:${PORT}/api/health`);
+});
+// Graceful Shutdown on SIGTERM and SIGINT
+const gracefulShutdown = (signal) => {
+    console.log(`\n🛑 Signal ${signal} empfangen. Beende KitaPlaner Server ordnungsgemäß...`);
+    server.close(() => {
+        console.log('HTTP Server geschlossen.');
+        try {
+            db.pragma('wal_checkpoint(TRUNCATE)');
+            db.close();
+            console.log('SQLite Datenbank sauber geschlossen (WAL getruncated).');
+        }
+        catch (e) {
+            console.error('Fehler beim Schließen der Datenbank:', e);
+        }
+        process.exit(0);
+    });
+    setTimeout(() => {
+        console.error('Erzwungener Abbruch nach 10 Sekunden Timeout.');
+        process.exit(1);
+    }, 10000);
+};
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

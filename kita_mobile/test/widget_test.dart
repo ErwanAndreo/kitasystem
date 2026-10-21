@@ -42,6 +42,28 @@ void main() {
       expect(find.byType(Scaffold), findsWidgets);
     });
 
+    testWidgets('RequestsScreen renders actions and opens Wunschdienst modal', (WidgetTester tester) async {
+      await tester.pumpWidget(const KitaMitarbeiterApp());
+      await tester.pumpAndSettle();
+
+      // Navigate to Anträge tab
+      await tester.tap(find.byType(NavigationDestination).at(2));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Tausch & Anträge'), findsOneWidget);
+      expect(find.text('Wunschdienst\nhinterlegen'), findsOneWidget);
+      expect(find.text('Schicht\ntauschen'), findsOneWidget);
+      expect(find.text('Urlaub\nbeantragen'), findsOneWidget);
+      expect(find.text('Krank-\nmeldung'), findsOneWidget);
+
+      // Open Wunschdienst bottom sheet
+      await tester.tap(find.text('Wunschdienst\nhinterlegen'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Schichtwunsch einreichen'), findsOneWidget);
+      expect(find.text('Wunschdienst einreichen'), findsOneWidget);
+    });
+
     testWidgets('iPadOS & Tablet responsive layout test (large viewport 1024x768)', (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1024, 768);
       tester.view.devicePixelRatio = 1.0;
