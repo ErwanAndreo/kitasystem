@@ -149,6 +149,17 @@ class ApiService {
     }
   }
 
+  static Future<List<AuditLogModel>> getAuditLogs(String staffId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/staff/$staffId/audit-log')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        return data.map((e) => AuditLogModel.fromJson(e)).toList();
+      }
+    } catch (_) {}
+    return _mockAuditLogs(staffId);
+  }
+
   // --- MOCK FALLBACK DATA ---
   static List<StaffModel> _mockStaff() {
     return [
@@ -231,6 +242,31 @@ class ApiService {
       GroupNoteModel(id: 'gn_1', groupId: groupId, childName: 'Mia (4J)', category: 'DIET', note: 'Laktose- & Glutenunverträglichkeit (Spezialessen vom Caterer)'),
       GroupNoteModel(id: 'gn_2', groupId: groupId, childName: 'Ben (5J)', category: 'INFO', note: 'Beginnt heute mit der Eingewöhnung in die Vorschulgruppe'),
       GroupNoteModel(id: 'gn_3', groupId: groupId, childName: 'Felix (2J)', category: 'ALLERGY', note: 'Starke Erdnussallergie (Notfall-Pen im Kasten)'),
+    ];
+  }
+
+  static List<AuditLogModel> _mockAuditLogs(String staffId) {
+    return [
+      AuditLogModel(
+        id: 'log_1',
+        staffId: staffId,
+        category: 'OVERTIME_ADJUSTMENT',
+        title: 'Überstunden-Gutschrift: +2.5 Std.',
+        description: 'Gutschrift für Elternabend Vorschulkinder durch Sabine Weber (Leitung).',
+        changedBy: 'Sabine Weber (Leitung)',
+        createdAt: DateTime.now().subtract(const Duration(hours: 3)).toIso8601String(),
+        isRead: false,
+      ),
+      AuditLogModel(
+        id: 'log_2',
+        staffId: staffId,
+        category: 'SHIFT_CHANGE',
+        title: 'Schichtplan aktualisiert',
+        description: 'Schicht am Freitag auf 08:30 - 17:30 Uhr (Spätdienst) festgelegt.',
+        changedBy: 'Sabine Weber (Leitung)',
+        createdAt: DateTime.now().subtract(const Duration(hours: 12)).toIso8601String(),
+        isRead: false,
+      ),
     ];
   }
 }

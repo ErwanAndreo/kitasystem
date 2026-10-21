@@ -1,19 +1,39 @@
 import React, { useState } from 'react';
 import { Staff, Group, Role } from '../types';
-import { Users, UserPlus, Shield, Award, Clock, Key, Check } from 'lucide-react';
+import { 
+  Users, 
+  UserPlus, 
+  Shield, 
+  Award, 
+  Clock, 
+  Key, 
+  Check, 
+  Edit, 
+  Trash2, 
+  History, 
+  X,
+  Calendar
+} from 'lucide-react';
 
 interface StaffManagementProps {
   staffList: Staff[];
   groups: Group[];
   onAddStaff: (newStaff: any) => Promise<void>;
+  onUpdateStaff: (id: string, updated: any) => Promise<void>;
+  onRefresh: () => void;
 }
 
 export const StaffManagement: React.FC<StaffManagementProps> = ({
   staffList,
   groups,
-  onAddStaff
+  onAddStaff,
+  onUpdateStaff,
+  onRefresh
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingStaffId, setEditingStaffId] = useState<string | null>(null);
+
+  // Form State
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -22,15 +42,19 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
     qualification: 'Staatl. anerkannte/r Erzieher/in',
     is_fachkraft: true,
     weekly_hours: 39.0,
+    work_days: 5,
+    annual_vacation_days: 30,
     target_group_id: groups[0]?.id || '',
     pin: '1234',
     color: '#10b981'
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await onAddStaff(formData);
-    setModalOpen(false);
+  // Audit history modal
+  const [auditStaff, setAuditStaff] = useState<Staff | null>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+
+  const handleOpenCreate = () => {
+    setEditingStaffId(null);
     setFormData({
       name: '',
       email: '',
@@ -39,35 +63,85 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
       qualification: 'Staatl. anerkannte/r Erzieher/in',
       is_fachkraft: true,
       weekly_hours: 39.0,
+      work_days: 5,
+      annual_vacation_days: 30,
       target_group_id: groups[0]?.id || '',
       pin: '1234',
       color: '#10b981'
     });
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (staff: Staff) => {
+    setEditingStaffId(staff.id);
+    setFormData({
+      name: staff.name,
+      email: staff.email,
+      phone: staff.phone || '',
+      role: staff.role,
+      qualification: staff.qualification,
+      is_fachkraft: staff.is_fachkraft === 1,
+      weekly_hours: staff.weekly_hours,
+      work_days: staff.work_days || 5,
+      annual_vacation_days: staff.annual_vacation_days || 30,
+      target_group_id: staff.target_group_id || '',
+      pin: staff.pin,
+      color: staff.color
+    });
+    setModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingStaffId) {
+      await onUpdateStaff(editingStaffId, formData);
+    } else {
+      await onAddStaff(formData);
+    }
+    setModalOpen(false);
+  };
+
+  const handleOpenAuditLog = async (staff: Staff) => {
+    setAuditStaff(staff);
+    try {
+      const res = await fetch(`/api/staff/${staff.id}/audit-log`);
+      const data = await res.json();
+      setAuditLogs(data);
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
     <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mt-6">
-      <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+      {/* Title & Add Account Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
         <div>
-          <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
-            <Users className="w-4 h-4 text-emerald-600" />
-            <span>Mitarbeiter- & Qualifikationsverwaltung</span>
-          </h2>
+          <div className="flex items-center space-x-2">
+            <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
+              <Users className="w-5 h-5 text-emerald-600" />
+              <span>Personal- & Accountverwaltung</span>
+            </h2>
+            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              Leitungs-Perspektive
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Personalstamm, Rollen, Fachkraftquoten & Kiosk-PINs
+            Accounts anlegen, vertragliche Wochenstunden einstellen, Stammgruppen & Kiosk-PINs
           </p>
         </div>
 
         <button
-          onClick={() => setModalOpen(true)}
-          className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-semibold shadow-xs transition-all active:scale-95"
+          onClick={handleOpenCreate}
+          className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-xs transition-all active:scale-95"
         >
           <UserPlus className="w-4 h-4" />
-          <span>Mitarbeiter:in anlegen</span>
+          <span>Neuen Account anlegen</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
+      {/* Staff List Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">
         {staffList.map((s) => {
           const groupName = groups.find(g => g.id === s.target_group_id)?.name || 'Springer / Einrichtungsübergreifend';
 
@@ -98,7 +172,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                         : 'bg-slate-200 text-slate-700'
                     }`}
                   >
-                    {s.is_fachkraft === 1 ? 'Fachkraft' : 'Ergänzungskraft'}
+                    {s.is_fachkraft === 1 ? 'Fachkraft' : 'Ergänzung'}
                   </span>
                 </div>
 
@@ -107,36 +181,68 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                     <Award className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span className="truncate">{s.qualification}</span>
                   </div>
-                  <div className="flex items-center space-x-1.5">
-                    <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+
+                  {/* Weekly Hours and Work Days */}
+                  <div className="flex items-center space-x-1.5 font-bold text-slate-800">
+                    <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
                     <span>{s.weekly_hours} Std./Woche</span>
                     <span className="text-slate-300">•</span>
-                    <span className="text-slate-500 truncate">{groupName}</span>
+                    <span className="text-slate-500 font-normal">{s.work_days || 5} Arbeitstage</span>
+                  </div>
+
+                  <div className="flex items-center space-x-1.5 text-slate-500">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>Urlaubsanspruch: {s.annual_vacation_days || 30} Tage</span>
+                    <span className="text-slate-300">•</span>
+                    <span className="truncate">{groupName.split(' ')[0]}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="border-t border-slate-200/80 mt-3 pt-2 flex items-center justify-between text-[11px] text-slate-400">
-                <span className="flex items-center space-x-1">
-                  <Key className="w-3 h-3 text-slate-400" />
-                  <span>Kiosk-PIN: ••••</span>
+              {/* Action Buttons & PIN */}
+              <div className="border-t border-slate-200/80 mt-3.5 pt-2.5 flex items-center justify-between text-xs">
+                <span className="text-[11px] font-mono text-slate-400">
+                  PIN: {s.pin}
                 </span>
-                <span className="text-emerald-700 font-semibold">{s.email}</span>
+
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={() => handleOpenAuditLog(s)}
+                    className="p-1.5 hover:bg-slate-200 text-slate-500 hover:text-slate-800 rounded-lg transition-colors"
+                    title="Änderungsprotokoll / Historie ansehen"
+                  >
+                    <History className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenEdit(s)}
+                    className="flex items-center space-x-1 px-2.5 py-1 bg-white hover:bg-indigo-50 border border-slate-300 hover:border-indigo-300 text-indigo-700 font-semibold text-[11px] rounded-lg transition-colors"
+                    title="Vertrag & Wochenstunden anpassen"
+                  >
+                    <Edit className="w-3 h-3" />
+                    <span>Bearbeiten</span>
+                  </button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Add Staff Modal */}
+      {/* Modal: Create or Edit Account */}
       {modalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
-            <h3 className="text-base font-bold text-slate-900 mb-4">
-              Neues Teammitglied erfassen (Onboarding Wizard)
-            </h3>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-900">
+                {editingStaffId ? 'Mitarbeiter-Vertrag anpassen' : 'Neuen Mitarbeiter-Account erstellen'}
+              </h3>
+              <button onClick={() => setModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            <form onSubmit={handleSubmit} className="space-y-3.5">
+            <form onSubmit={handleSubmit} className="mt-4 space-y-3.5">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Vollständiger Name</label>
@@ -184,59 +290,70 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                 />
               </div>
 
+              {/* CORE CONTRACT HOURS SETTING */}
+              <div className="p-3 bg-indigo-50/60 border border-indigo-200 rounded-xl space-y-2.5">
+                <div className="text-xs font-bold text-indigo-900 flex items-center space-x-1">
+                  <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>Vertragliche Arbeitszeit & Urlaub (Leitungs-Vorgabe):</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                      Erwartete Wochenstunden
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      required
+                      value={formData.weekly_hours}
+                      onChange={(e) => setFormData({ ...formData, weekly_hours: Number(e.target.value) })}
+                      className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                      Arbeitstage/Woche
+                    </label>
+                    <select
+                      value={formData.work_days}
+                      onChange={(e) => setFormData({ ...formData, work_days: Number(e.target.value) })}
+                      className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white font-bold"
+                    >
+                      <option value={5}>5 Tage (Mo-Fr)</option>
+                      <option value={4}>4 Tage</option>
+                      <option value={3}>3 Tage</option>
+                      <option value={2}>2 Tage</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
+                      Urlaubstage/Jahr
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={formData.annual_vacation_days}
+                      onChange={(e) => setFormData({ ...formData, annual_vacation_days: Number(e.target.value) })}
+                      className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">E-Mail</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">E-Mail (Login)</label>
                   <input
                     type="email"
                     required
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="j.mueller@kita.de"
                     className="w-full text-xs p-2.5 border border-slate-300 rounded-xl"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Telefon</label>
-                  <input
-                    type="text"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="0170-123456"
-                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Wochenstunden</label>
-                  <input
-                    type="number"
-                    step="0.5"
-                    required
-                    value={formData.weekly_hours}
-                    onChange={(e) => setFormData({ ...formData, weekly_hours: Number(e.target.value) })}
-                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Stammgruppe</label>
-                  <select
-                    value={formData.target_group_id}
-                    onChange={(e) => setFormData({ ...formData, target_group_id: e.target.value })}
-                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
-                  >
-                    <option value="">Keine (Springer)</option>
-                    {groups.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Kiosk PIN (4-stellig)</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Kiosk-PIN (4-stellig)</label>
                   <input
                     type="text"
                     maxLength={4}
@@ -247,11 +364,20 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                 </div>
               </div>
 
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-center space-x-2">
-                <Shield className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>
-                  Fachkraft-Status für Betreuungsschlüssel: <strong>{formData.is_fachkraft ? 'Ja (100% Wert)' : 'Nein (Ergänzungskraft)'}</strong>
-                </span>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Stammgruppe</label>
+                <select
+                  value={formData.target_group_id}
+                  onChange={(e) => setFormData({ ...formData, target_group_id: e.target.value })}
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-xl bg-white"
+                >
+                  <option value="">Keine (Springer / Flexibel)</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">
@@ -266,10 +392,63 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                   type="submit"
                   className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs"
                 >
-                  Mitarbeiter:in speichern
+                  {editingStaffId ? 'Änderungen speichern & Mitarbeiter informieren' : 'Account anlegen'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: View Staff Audit Log */}
+      {auditStaff && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Änderungsprotokoll: {auditStaff.name}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Alle durch die Leitung vorgenommenen Änderungen & Anpassungen
+                </p>
+              </div>
+              <button onClick={() => setAuditStaff(null)} className="p-1 text-slate-400 hover:text-slate-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[340px] overflow-y-auto space-y-2.5">
+              {auditLogs.length === 0 ? (
+                <div className="text-xs text-slate-400 py-6 text-center">
+                  Bisher keine protokollierten Änderungen.
+                </div>
+              ) : (
+                auditLogs.map((log) => (
+                  <div key={log.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+                    <div className="flex items-center justify-between font-bold text-slate-900">
+                      <span>{log.title}</span>
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        {new Date(log.created_at).toLocaleString('de-DE')}
+                      </span>
+                    </div>
+                    <div className="text-slate-600 mt-1">{log.description}</div>
+                    <div className="text-[10px] text-indigo-600 mt-1 font-semibold">
+                      Durch: {log.changed_by}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setAuditStaff(null)}
+                className="px-4 py-2 text-xs font-semibold bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl"
+              >
+                Schließen
+              </button>
+            </div>
           </div>
         </div>
       )}

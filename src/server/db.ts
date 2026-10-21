@@ -1,6 +1,5 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import fs from 'fs';
 import { format, addDays, startOfWeek } from 'date-fns';
 
 const dbPath = path.resolve(process.cwd(), 'kita.sqlite');
@@ -20,10 +19,13 @@ export function initDb() {
       qualification TEXT NOT NULL,
       is_fachkraft INTEGER NOT NULL DEFAULT 1,
       weekly_hours REAL NOT NULL,
+      work_days INTEGER NOT NULL DEFAULT 5,
+      annual_vacation_days INTEGER NOT NULL DEFAULT 30,
       target_group_id TEXT,
       pin TEXT NOT NULL DEFAULT '1234',
       avatar TEXT,
-      color TEXT NOT NULL DEFAULT '#16a34a'
+      color TEXT NOT NULL DEFAULT '#16a34a',
+      is_active INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS groups (
@@ -115,36 +117,102 @@ export function initDb() {
       note TEXT NOT NULL,
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS overtime_adjustments (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      hours REAL NOT NULL,
+      reason TEXT NOT NULL,
+      date TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS staff_audit_log (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      changed_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
   `);
+
+  // Migrate columns if needed
+  try {
+    db.prepare('ALTER TABLE staff ADD COLUMN work_days INTEGER NOT NULL DEFAULT 5').run();
+  } catch (_) {}
+  try {
+    db.prepare('ALTER TABLE staff ADD COLUMN annual_vacation_days INTEGER NOT NULL DEFAULT 30').run();
+  } catch (_) {}
+  try {
+    db.prepare('ALTER TABLE staff ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1').run();
+  } catch (_) {}
 
   // Check if initial seeding needed
   const staffCount = (db.prepare('SELECT COUNT(*) as c FROM staff').get() as { c: number }).c;
   if (staffCount === 0) {
     seedDatabase();
   } else {
-    seedAnnouncementsAndNotesIfMissing();
+    seedExtraTablesIfMissing();
   }
 }
 
-function seedAnnouncementsAndNotesIfMissing() {
-  const annCount = (db.prepare('SELECT COUNT(*) as c FROM announcements').get() as { c: number }).c;
-  if (annCount === 0) {
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const insertAnn = db.prepare('INSERT INTO announcements (id, title, content, priority, author, date) VALUES (?, ?, ?, ?, ?, ?)');
-    insertAnn.run('ann_1', 'Teammeeting am Donnerstag um 16:30 Uhr', 'Bitte alle vorbereiteten Beobachtungsbögen der Vorschulkinder mitbringen. Besprechung im Personalraum.', 'HIGH', 'Sabine Weber (Leitung)', today);
-    insertAnn.run('ann_2', 'Fotografentag am 28. Oktober', 'Ab 08:30 Uhr kommt der Kitafotograf. Bitte die Gruppenräume vormittags für Einzel- und Gruppenfotos freihalten.', 'NORMAL', 'Sabine Weber (Leitung)', today);
-    insertAnn.run('ann_3', 'Neuer Erste-Hilfe-Kurs für Bildungs- & Betreuungseinrichtungen', 'Die Auffrischung findet am Konzeptionstag (12. November) statt. Teilnahme ist für alle Fach- und Ergänzungskräfte verpflichtend.', 'NORMAL', 'Sabine Weber (Leitung)', today);
+function seedExtraTablesIfMissing() {
+  const today = format(new Date(), 'yyyy-MM-dd');
 
-    const insertNote = db.prepare('INSERT INTO group_notes (id, group_id, child_name, category, note) VALUES (?, ?, ?, ?, ?)');
-    // U3 Krabbelmäuse
-    insertNote.run('gn_1', 'g_u3_maeuse', 'Felix (2J)', 'ALLERGY', 'Starke Erdnuss- & Haselnussallergie (Notfall-Pen im Erste-Hilfe-Kasten Gruppe)');
-    insertNote.run('gn_2', 'g_u3_maeuse', 'Emilia (1.5J)', 'HEALTH', 'Muss nach dem Mittagsschlaf mit Wundsalbe versorgt werden');
-    insertNote.run('gn_3', 'g_u3_maeuse', 'Noah (2J)', 'PICKUP', 'Wird heute ausnahmsweise von der Oma (Frau Berger) um 14:30 Uhr abgeholt');
-    // Ü3 Sonnenschein
-    insertNote.run('gn_4', 'g_ue3_sonne', 'Mia (4J)', 'DIET', 'Laktose- & Glutenunverträglichkeit (Spezialessen vom Caterer)');
-    insertNote.run('gn_5', 'g_ue3_sonne', 'Ben (5J)', 'INFO', 'Beginnt heute mit der Eingewöhnung in die Vorschulgruppe');
-    // Ü3 Waldwichtel
-    insertNote.run('gn_6', 'g_ue3_wald', 'Lina (4J)', 'ALLERGY', 'Wespenstich-Allergie');
+  // Seed sample overtime adjustments
+  const adjCount = (db.prepare('SELECT COUNT(*) as c FROM overtime_adjustments').get() as { c: number }).c;
+  if (adjCount === 0) {
+    const insertAdj = db.prepare(`
+      INSERT INTO overtime_adjustments (id, staff_id, hours, reason, date, created_by, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertAdj.run('adj_1', 's_lukas', 2.5, 'Elternabend Vorschulkinder (18:00 - 20:30 Uhr)', today, 'Sabine Weber (Leitung)', new Date().toISOString());
+    insertAdj.run('adj_2', 's_anna', 3.0, 'Vorbereitung Laternenfest', today, 'Sabine Weber (Leitung)', new Date().toISOString());
+  }
+
+  // Seed sample staff audit logs
+  const logCount = (db.prepare('SELECT COUNT(*) as c FROM staff_audit_log').get() as { c: number }).c;
+  if (logCount === 0) {
+    const insertLog = db.prepare(`
+      INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertLog.run(
+      'log_1',
+      's_lukas',
+      'OVERTIME_ADJUSTMENT',
+      'Überstundengutschrift: +2.5 Std.',
+      'Gutschrift für die Teilnahme am Elternabend Vorschulkinder (18:00 - 20:30 Uhr).',
+      'Sabine Weber (Leitung)',
+      new Date(Date.now() - 3600000 * 3).toISOString(),
+      0
+    );
+    insertLog.run(
+      'log_2',
+      's_lukas',
+      'SHIFT_CHANGE',
+      'Schicht angepasst für Freitag',
+      'Deine Schicht wurde auf 08:30 - 17:30 Uhr (Spätdienst) festgelegt.',
+      'Sabine Weber (Leitung)',
+      new Date(Date.now() - 3600000 * 8).toISOString(),
+      0
+    );
+    insertLog.run(
+      'log_3',
+      's_anna',
+      'HOURS_CHANGE',
+      'Vertragswochenstunden angepasst',
+      'Vertragliche Wochenstunden wurden auf 39.0 Std./Woche bestätigt.',
+      'Sabine Weber (Leitung)',
+      new Date(Date.now() - 3600000 * 24).toISOString(),
+      0
+    );
   }
 }
 
@@ -156,25 +224,25 @@ function seedDatabase() {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
-  insertGroup.run('g_u3_maeuse', 'Krabbelmäuse (Krippe U3)', 'U3', 10, 3.33, 0.67, '#f43f5e'); // 1:3.3
-  insertGroup.run('g_ue3_sonne', 'Sonnenschein (Elementar Ü3)', 'UE3', 25, 8.0, 0.50, '#eab308'); // 1:8
-  insertGroup.run('g_ue3_wald', 'Waldwichtel (Elementar Ü3)', 'UE3', 24, 8.0, 0.50, '#10b981'); // 1:8
+  insertGroup.run('g_u3_maeuse', 'Krabbelmäuse (Krippe U3)', 'U3', 10, 3.33, 0.67, '#f43f5e');
+  insertGroup.run('g_ue3_sonne', 'Sonnenschein (Elementar Ü3)', 'UE3', 25, 8.0, 0.50, '#eab308');
+  insertGroup.run('g_ue3_wald', 'Waldwichtel (Elementar Ü3)', 'UE3', 24, 8.0, 0.50, '#10b981');
 
   const insertStaff = db.prepare(`
-    INSERT INTO staff (id, name, email, phone, role, qualification, is_fachkraft, weekly_hours, target_group_id, pin, avatar, color)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO staff (id, name, email, phone, role, qualification, is_fachkraft, weekly_hours, work_days, annual_vacation_days, target_group_id, pin, avatar, color, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
   `);
 
-  insertStaff.run('s_sabine', 'Sabine Weber (Leitung)', 'leitung@kita-sonnenschein.de', '0171-112233', 'LEITUNG', 'Staatl. anerkannte Sozialpädagogin', 1, 39.0, null, '1111', 'SW', '#4f46e5');
-  insertStaff.run('s_sarah', 'Sarah Klein', 'sarah.k@kita-sonnenschein.de', '0172-223344', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 39.0, 'g_u3_maeuse', '2222', 'SK', '#ec4899');
-  insertStaff.run('s_lisa', 'Lisa Hoffmann', 'lisa.h@kita-sonnenschein.de', '0173-334455', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 35.0, 'g_u3_maeuse', '3333', 'LH', '#f97316');
-  insertStaff.run('s_markus', 'Markus Becker', 'markus.b@kita-sonnenschein.de', '0174-445566', 'ERGAENZUNGSKRAFT', 'Staatl. geprüfter Kinderpfleger', 0, 30.0, 'g_u3_maeuse', '4444', 'MB', '#06b6d4');
-  insertStaff.run('s_anna', 'Anna Schmidt', 'anna.s@kita-sonnenschein.de', '0175-556677', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 39.0, 'g_ue3_sonne', '5555', 'AS', '#eab308');
-  insertStaff.run('s_lukas', 'Lukas Wagner', 'lukas.w@kita-sonnenschein.de', '0176-667788', 'FACHKRAFT', 'Staatl. anerkannter Erzieher', 1, 39.0, 'g_ue3_sonne', '6666', 'LW', '#84cc16');
-  insertStaff.run('s_elena', 'Elena Rossi', 'elena.r@kita-sonnenschein.de', '0177-778899', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 32.0, 'g_ue3_wald', '7777', 'ER', '#10b981');
-  insertStaff.run('s_jonas', 'Jonas Meyer', 'jonas.m@kita-sonnenschein.de', '0178-889900', 'ERGAENZUNGSKRAFT', 'Kinderpfleger & Heilerziehungspflege', 0, 25.0, 'g_ue3_wald', '8888', 'JM', '#14b8a6');
-  insertStaff.run('s_julia', 'Julia Fischer (Springerin)', 'julia.f@kita-sonnenschein.de', '0179-990011', 'SPRINGER', 'Staatl. anerkannte Erzieherin', 1, 20.0, null, '9999', 'JF', '#8b5cf6');
-  insertStaff.run('s_leonie', 'Leonie Wolf (FSJ)', 'leonie.w@kita-sonnenschein.de', '0170-001122', 'AZUBI', 'Bundesfreiwilligendienst', 0, 39.0, 'g_ue3_sonne', '0000', 'LW', '#64748b');
+  insertStaff.run('s_sabine', 'Sabine Weber (Leitung)', 'leitung@kita-sonnenschein.de', '0171-112233', 'LEITUNG', 'Staatl. anerkannte Sozialpädagogin', 1, 39.0, 5, 30, null, '1111', 'SW', '#4f46e5');
+  insertStaff.run('s_sarah', 'Sarah Klein', 'sarah.k@kita-sonnenschein.de', '0172-223344', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 39.0, 5, 30, 'g_u3_maeuse', '2222', 'SK', '#ec4899');
+  insertStaff.run('s_lisa', 'Lisa Hoffmann', 'lisa.h@kita-sonnenschein.de', '0173-334455', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 35.0, 5, 30, 'g_u3_maeuse', '3333', 'LH', '#f97316');
+  insertStaff.run('s_markus', 'Markus Becker', 'markus.b@kita-sonnenschein.de', '0174-445566', 'ERGAENZUNGSKRAFT', 'Staatl. geprüfter Kinderpfleger', 0, 30.0, 4, 25, 'g_u3_maeuse', '4444', 'MB', '#06b6d4');
+  insertStaff.run('s_anna', 'Anna Schmidt', 'anna.s@kita-sonnenschein.de', '0175-556677', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 39.0, 5, 30, 'g_ue3_sonne', '5555', 'AS', '#eab308');
+  insertStaff.run('s_lukas', 'Lukas Wagner', 'lukas.w@kita-sonnenschein.de', '0176-667788', 'FACHKRAFT', 'Staatl. anerkannter Erzieher', 1, 39.0, 5, 30, 'g_ue3_sonne', '6666', 'LW', '#84cc16');
+  insertStaff.run('s_elena', 'Elena Rossi', 'elena.r@kita-sonnenschein.de', '0177-778899', 'FACHKRAFT', 'Staatl. anerkannte Erzieherin', 1, 32.0, 4, 26, 'g_ue3_wald', '7777', 'ER', '#10b981');
+  insertStaff.run('s_jonas', 'Jonas Meyer', 'jonas.m@kita-sonnenschein.de', '0178-889900', 'ERGAENZUNGSKRAFT', 'Kinderpfleger & Heilerziehungspflege', 0, 25.0, 3, 20, 'g_ue3_wald', '8888', 'JM', '#14b8a6');
+  insertStaff.run('s_julia', 'Julia Fischer (Springerin)', 'julia.f@kita-sonnenschein.de', '0179-990011', 'SPRINGER', 'Staatl. anerkannte Erzieherin', 1, 20.0, 3, 20, null, '9999', 'JF', '#8b5cf6');
+  insertStaff.run('s_leonie', 'Leonie Wolf (FSJ)', 'leonie.w@kita-sonnenschein.de', '0170-001122', 'AZUBI', 'Bundesfreiwilligendienst', 0, 39.0, 5, 26, 'g_ue3_sonne', '0000', 'LW', '#64748b');
 
   // Shift templates
   const insertTemplate = db.prepare(`
@@ -279,24 +347,6 @@ function seedDatabase() {
     new Date(Date.now() - 3600000 * 5).toISOString()
   );
 
-  insertApproval.run(
-    'appr_emerg_1',
-    'EMERGENCY_REPLACEMENT',
-    's_julia',
-    's_sarah',
-    `shift_${todayStr}_sarah`,
-    'abs_sarah_sick',
-    JSON.stringify({
-      title: 'Notfall-Zuweisung: Springerin Julia Fischer in Krippe',
-      description: 'Durch den Ausfall von Sarah Klein droht in der Krippengruppe Unterbesetzung (Schlüssel 1:5.0 statt 1:3.3). Julia Fischer steht als Springerin zur Verfügung.',
-      group: 'Krabbelmäuse (Krippe U3)',
-      time: '08:30 - 15:30 Uhr',
-      ratio_impact: 'Stellt den gesetzeskonformen Betreuungsschlüssel sofort wieder auf 1:2.5 her.'
-    }),
-    'PENDING',
-    new Date(Date.now() - 1800000).toISOString()
-  );
-
-  seedAnnouncementsAndNotesIfMissing();
+  seedExtraTablesIfMissing();
   console.log('✅ Database seeded successfully!');
 }

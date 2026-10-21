@@ -239,3 +239,39 @@ class StaffStatsModel {
     );
   }
 }
+
+
+class AuditLogModel {
+  final String id;
+  final String staffId;
+  final String category;
+  final String title;
+  final String description;
+  final String changedBy;
+  final String createdAt;
+  final bool isRead;
+
+  AuditLogModel({
+    required this.id,
+    required this.staffId,
+    required this.category,
+    required this.title,
+    required this.description,
+    required this.changedBy,
+    required this.createdAt,
+    required this.isRead,
+  });
+
+  factory AuditLogModel.fromJson(Map<String, dynamic> json) {
+    return AuditLogModel(
+      id: json['id'] ?? '',
+      staffId: json['staff_id'] ?? '',
+      category: json['category'] ?? '',
+      title: json['title'] ?? '',
+      description: json['description'] ?? '',
+      changedBy: json['changed_by'] ?? '',
+      createdAt: json['created_at'] ?? '',
+      isRead: (json['is_read'] ?? 0) == 1,
+    );
+  }
+}

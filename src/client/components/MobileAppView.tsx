@@ -17,7 +17,9 @@ import {
   Megaphone,
   UserCheck,
   Shield,
-  FileText
+  FileText,
+  Bell,
+  TrendingUp
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -40,12 +42,12 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   onRequestVacation
 }) => {
   const [currentStaffId, setCurrentStaffId] = useState<string>(staffList[5]?.id || staffList[1]?.id || 's_lukas');
-  const [activeTab, setActiveTab] = useState<'HOME' | 'ROSTER' | 'SWAP' | 'BOARD'>('HOME');
+  const [activeTab, setActiveTab] = useState<'HOME' | 'ROSTER' | 'SWAP' | 'CHANGES' | 'BOARD'>('HOME');
 
-  // Extra data for staff
   const [groupNotes, setGroupNotes] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [staffStats, setStaffStats] = useState<any>(null);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Swap Form State
   const [swapShiftId, setSwapShiftId] = useState<string>('');
@@ -69,7 +71,6 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
     a => a.requester_id === currentStaffId || a.target_id === currentStaffId
   );
 
-  // Co-workers today in the same group
   const coWorkersToday = todayShift
     ? shifts.filter(s => s.group_id === todayShift.group_id && s.date === todayStr && s.staff_id !== currentStaffId)
     : [];
@@ -80,12 +81,14 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
   const loadDetails = async () => {
     try {
-      const [annRes, statsRes] = await Promise.all([
+      const [annRes, statsRes, auditRes] = await Promise.all([
         fetch('/api/announcements'),
-        fetch(`/api/staff/${currentStaffId}/stats`)
+        fetch(`/api/staff/${currentStaffId}/stats`),
+        fetch(`/api/staff/${currentStaffId}/audit-log`)
       ]);
       setAnnouncements(await annRes.json());
       setStaffStats(await statsRes.json());
+      setAuditLogs(await auditRes.json());
 
       const groupId = todayShift?.group_id || currentUser?.target_group_id || 'g_ue3_sonne';
       const notesRes = await fetch(`/api/groups/${groupId}/details`);
@@ -125,21 +128,23 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
     setTimeout(() => setVacSuccessMsg(null), 4000);
   };
 
+  const unreadChangesCount = auditLogs.filter(l => l.is_read === 0).length;
+
   return (
     <div className="max-w-md mx-auto my-6">
       <div className="bg-slate-900 rounded-[44px] p-3 shadow-2xl border-4 border-slate-800">
-        {/* Notch / Speaker */}
+        {/* Notch */}
         <div className="h-5 w-32 bg-slate-800 rounded-full mx-auto mb-2 flex items-center justify-center">
           <div className="w-10 h-1 bg-slate-700 rounded-full" />
         </div>
 
-        {/* Mobile Screen Container */}
+        {/* Screen */}
         <div className="bg-slate-50 rounded-[34px] overflow-hidden min-h-[720px] flex flex-col border border-slate-200">
-          {/* Header Bar */}
+          {/* Header */}
           <div className="bg-emerald-600 text-white p-4 pt-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[10px] font-bold text-emerald-200 tracking-wider">
-                MITARBEITER-APP (iOS & Android)
+                MITARBEITER-APP
               </span>
               <div className="flex items-center space-x-1 text-[10px] bg-emerald-700/60 px-2 py-0.5 rounded-full">
                 <span>SIMULATION:</span>
@@ -164,18 +169,21 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
               >
                 {currentUser?.avatar}
               </div>
-              <div>
-                <h3 className="font-bold text-base leading-tight">{currentUser?.name}</h3>
+              <div className="min-w-0">
+                <h3 className="font-bold text-base leading-tight truncate">{currentUser?.name}</h3>
                 <p className="text-xs text-emerald-100">{currentUser?.qualification}</p>
+                <p className="text-[10px] text-emerald-200 font-semibold mt-0.5">
+                  Vertrag: {currentUser?.weekly_hours}h/Woche • {currentUser?.work_days || 5} Tage
+                </p>
               </div>
             </div>
           </div>
 
-          {/* Tab Navigation */}
-          <div className="grid grid-cols-4 border-b border-slate-200 bg-white text-center">
+          {/* Tab Navigation (5 Tabs) */}
+          <div className="grid grid-cols-5 border-b border-slate-200 bg-white text-center">
             <button
               onClick={() => setActiveTab('HOME')}
-              className={`py-2.5 text-[11px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
                 activeTab === 'HOME' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
@@ -183,27 +191,38 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('ROSTER')}
-              className={`py-2.5 text-[11px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
                 activeTab === 'ROSTER' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
-              Dienstplan
+              Plan
             </button>
             <button
               onClick={() => setActiveTab('SWAP')}
-              className={`py-2.5 text-[11px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
                 activeTab === 'SWAP' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
               Anträge
             </button>
             <button
+              onClick={() => setActiveTab('CHANGES')}
+              className={`py-2 text-[10px] font-bold border-b-2 transition-all relative ${
+                activeTab === 'CHANGES' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'
+              }`}
+            >
+              <span>Änderungen</span>
+              {unreadChangesCount > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-indigo-600 animate-ping" />
+              )}
+            </button>
+            <button
               onClick={() => setActiveTab('BOARD')}
-              className={`py-2.5 text-[11px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
                 activeTab === 'BOARD' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
-              Pinnwand
+              Konto
             </button>
           </div>
 
@@ -237,7 +256,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         Pause: {todayShift.break_minutes} Min. • Gruppe: {todayShift.group_name}
                       </div>
 
-                      {/* Team in group today */}
+                      {/* Co-workers */}
                       <div className="mt-3 pt-3 border-t border-slate-100">
                         <div className="text-[11px] font-bold text-slate-500 mb-1.5">
                           Mit dir im Gruppendienst:
@@ -316,7 +335,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   </div>
                 </div>
 
-                {/* Important Group Notes & Allergies */}
+                {/* Group Notes & Allergies */}
                 <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
@@ -347,7 +366,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
               </>
             )}
 
-            {/* TAB 2: DIENSTPLAN */}
+            {/* TAB 2: ROSTER */}
             {activeTab === 'ROSTER' && (
               <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
                 <div className="text-xs font-bold text-slate-900 mb-3">
@@ -376,10 +395,9 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
               </div>
             )}
 
-            {/* TAB 3: ANTRÄGE & TAUSCH */}
+            {/* TAB 3: SWAP & VACATION */}
             {activeTab === 'SWAP' && (
               <div className="space-y-3.5">
-                {/* Swap Request Form */}
                 <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
                   <h4 className="font-bold text-xs text-slate-900 mb-2 flex items-center space-x-1.5">
                     <ArrowRightLeft className="w-3.5 h-3.5 text-blue-600" />
@@ -430,18 +448,11 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   </form>
                 </div>
 
-                {/* Vacation Request Form */}
                 <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
                   <h4 className="font-bold text-xs text-slate-900 mb-2 flex items-center space-x-1.5">
                     <Palmtree className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Urlaub beantragen</span>
                   </h4>
-
-                  {vacSuccessMsg && (
-                    <div className="p-2 mb-2 bg-emerald-50 text-emerald-800 text-xs rounded-lg">
-                      {vacSuccessMsg}
-                    </div>
-                  )}
 
                   <form onSubmit={handleSendVacation} className="space-y-2.5">
                     <div className="grid grid-cols-2 gap-2">
@@ -466,43 +477,51 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     </button>
                   </form>
                 </div>
+              </div>
+            )}
 
-                {/* Status of requests */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
-                  <div className="text-xs font-bold text-slate-900 mb-2">
-                    Freigabe-Status ({userApprovals.length})
+            {/* TAB 4: ÄNDERUNGEN DURCH DIE LEITUNG (TRANSPARENZ-LOG) */}
+            {activeTab === 'CHANGES' && (
+              <div className="space-y-3.5">
+                <div className="bg-indigo-50/70 p-3.5 rounded-2xl border border-indigo-200">
+                  <div className="flex items-center space-x-2 text-indigo-900 font-bold text-xs">
+                    <Bell className="w-4 h-4 text-indigo-600" />
+                    <span>Änderungen durch die Leitung</span>
                   </div>
-                  <div className="space-y-2">
-                    {userApprovals.map((appr) => (
+                  <p className="text-[11px] text-indigo-700 mt-1">
+                    Hier siehst du alle Schichtanpassungen, Überstundengutschriften und Vertragsänderungen von Sabine Weber.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {auditLogs.length === 0 ? (
+                    <div className="text-xs text-slate-400 py-6 text-center bg-white rounded-2xl border border-slate-200">
+                      Keine Änderungen protokolliert.
+                    </div>
+                  ) : (
+                    auditLogs.map((log) => (
                       <div
-                        key={appr.id}
-                        className="p-2.5 rounded-xl border border-slate-200 text-xs bg-slate-50"
+                        key={log.id}
+                        className="p-3 bg-white rounded-2xl border border-slate-200 shadow-xs text-xs space-y-1"
                       >
                         <div className="flex items-center justify-between font-bold text-slate-900">
-                          <span>{appr.details.title}</span>
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full ${
-                              appr.status === 'PENDING'
-                                ? 'bg-amber-100 text-amber-900'
-                                : appr.status === 'APPROVED'
-                                ? 'bg-emerald-100 text-emerald-900'
-                                : 'bg-rose-100 text-rose-900'
-                            }`}
-                          >
-                            {appr.status === 'PENDING' ? '⏳ Leitung prüft' : appr.status === 'APPROVED' ? '✓ Freigegeben' : '✗ Abgelehnt'}
+                          <span className="text-indigo-950 font-bold">{log.title}</span>
+                          <span className="text-[10px] text-slate-400 font-normal">
+                            {new Date(log.created_at).toLocaleDateString('de-DE')}
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-500 mt-1">
-                          {appr.details.description}
+                        <p className="text-slate-600 text-[11px]">{log.description}</p>
+                        <div className="text-[10px] text-slate-400 font-medium pt-0.5">
+                          Eingetragen von: {log.changed_by}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}
 
-            {/* TAB 4: PINNWAND & KONTO */}
+            {/* TAB 5: KONTO & PINNWAND */}
             {activeTab === 'BOARD' && (
               <div className="space-y-3.5">
                 {/* Stats Cards */}
@@ -512,11 +531,17 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     <div className="text-xl font-black text-emerald-600 mt-1">
                       {staffStats?.overtime_hours >= 0 ? `+${staffStats?.overtime_hours}h` : `${staffStats?.overtime_hours}h`}
                     </div>
+                    <div className="text-[9px] text-slate-400 mt-0.5">
+                      inkl. {staffStats?.adjustments_hours || 0}h Sonderstunden
+                    </div>
                   </div>
                   <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
                     <div className="text-[10px] font-bold text-slate-400">RESTURLAUB</div>
                     <div className="text-xl font-black text-slate-900 mt-1">
                       {staffStats?.remaining_vacation_days || 24} Tage
+                    </div>
+                    <div className="text-[9px] text-slate-400 mt-0.5">
+                      von {staffStats?.total_vacation_days || 30} Tagen gesamt
                     </div>
                   </div>
                 </div>
@@ -525,7 +550,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
                   <div className="text-xs font-bold text-slate-900 mb-3 flex items-center space-x-1.5">
                     <Megaphone className="w-4 h-4 text-blue-600" />
-                    <span>Kita-Pinnwand (Aushänge der Leitung)</span>
+                    <span>Kita-Pinnwand (Aushänge)</span>
                   </div>
 
                   <div className="space-y-2">

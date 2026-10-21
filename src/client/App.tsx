@@ -4,16 +4,26 @@ import { Header } from './components/Header';
 import { RatioRadar } from './components/RatioRadar';
 import { ApprovalCenter } from './components/ApprovalCenter';
 import { ShiftPlanner } from './components/ShiftPlanner';
+import { OvertimeTracker } from './components/OvertimeTracker';
+import { StaffManagement } from './components/StaffManagement';
 import { MobileAppView } from './components/MobileAppView';
 import { KioskView } from './components/KioskView';
-import { StaffManagement } from './components/StaffManagement';
 import { EmergencyModal } from './components/EmergencyModal';
 import { DatevExportModal } from './components/DatevExportModal';
 import { format, startOfWeek, addDays } from 'date-fns';
-import { Sparkles, Check, AlertTriangle } from 'lucide-react';
+import { 
+  Check, 
+  BarChart3, 
+  CalendarDays, 
+  Clock, 
+  Users, 
+  ShieldCheck, 
+  Sparkles 
+} from 'lucide-react';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'LEITUNG' | 'MOBILE' | 'KIOSK'>('LEITUNG');
+  const [leitungTab, setLeitungTab] = useState<'DASHBOARD' | 'ROSTER' | 'OVERTIME' | 'STAFF'>('DASHBOARD');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
 
   const [staffList, setStaffList] = useState<Staff[]>([]);
@@ -64,7 +74,7 @@ export const App: React.FC = () => {
     loadAllData();
   }, [currentDate]);
 
-  // Deciding an approval (The core requirement: Einrichtungsleitung freigeben)
+  // Deciding an approval (Einrichtungsleitung freigeben)
   const handleDecideApproval = async (id: string, action: 'APPROVED' | 'REJECTED', note?: string) => {
     try {
       const res = await fetch(`/api/approvals/${id}/decide`, {
@@ -135,7 +145,7 @@ export const App: React.FC = () => {
     await loadAllData();
   };
 
-  // Shift Management
+  // Shift Management (Schichten vom Personal einstellen)
   const handleAddShift = async (data: any) => {
     const res = await fetch('/api/shifts', {
       method: 'POST',
@@ -147,17 +157,17 @@ export const App: React.FC = () => {
     if (json.warning) {
       alert(json.warning);
     }
-    showToast('Schicht erfolgreich geplant!');
+    showToast('Schicht erfolgreich eingestellt & Mitarbeiterin benachrichtigt!');
     await loadAllData();
   };
 
   const handleDeleteShift = async (id: string) => {
     await fetch(`/api/shifts/${id}`, { method: 'DELETE' });
-    showToast('Schicht entfernt.');
+    showToast('Schicht gelöscht.');
     await loadAllData();
   };
 
-  // Add staff
+  // Staff Account Management
   const handleAddStaff = async (newStaff: any) => {
     const res = await fetch('/api/staff', {
       method: 'POST',
@@ -165,7 +175,18 @@ export const App: React.FC = () => {
       body: JSON.stringify(newStaff)
     });
     if (!res.ok) throw new Error('Fehler beim Anlegen');
-    showToast('Mitarbeiter:in erfolgreich angelegt!');
+    showToast('Mitarbeiter-Account erfolgreich erstellt!');
+    await loadAllData();
+  };
+
+  const handleUpdateStaff = async (id: string, updated: any) => {
+    const res = await fetch(`/api/staff/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
+    if (!res.ok) throw new Error('Fehler beim Aktualisieren');
+    showToast('Vertrag & Wochenstunden angepasst!');
     await loadAllData();
   };
 
@@ -200,43 +221,115 @@ export const App: React.FC = () => {
           </div>
         ) : (
           <>
-            {/* VIEW 1: LEITUNG (Windows & Web Cockpit) */}
+            {/* VIEW 1: PERSPEKTIVE DER EINRICHTUNGSLEITUNG (Windows / macOS / Web App) */}
             {currentView === 'LEITUNG' && (
               <div>
-                {/* 1. Live Betreuungsschlüssel Radar */}
-                <RatioRadar
-                  groupsStatus={ratioStatus}
-                  date={format(currentDate, 'EEEE, dd.MM.yyyy')}
-                />
+                {/* Leitung Navigation Tabs */}
+                <div className="flex items-center space-x-2 mb-6 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-xs max-w-fit">
+                  <button
+                    onClick={() => setLeitungTab('DASHBOARD')}
+                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      leitungTab === 'DASHBOARD'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    <span>Übersicht & Live-Radar</span>
+                    {pendingApprovalsCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-amber-400 text-slate-900 font-black">
+                        {pendingApprovalsCount}
+                      </span>
+                    )}
+                  </button>
 
-                {/* 2. Freigabe-Center der Einrichtungsleitung */}
-                <ApprovalCenter
-                  approvals={approvals}
-                  onDecide={handleDecideApproval}
-                  onRefresh={loadAllData}
-                />
+                  <button
+                    onClick={() => setLeitungTab('ROSTER')}
+                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      leitungTab === 'ROSTER'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <CalendarDays className="w-4 h-4" />
+                    <span>Schichtplanung</span>
+                  </button>
 
-                {/* 3. Wochendienstplaner */}
-                <ShiftPlanner
-                  shifts={shifts}
-                  staff={staffList}
-                  groups={groups}
-                  currentDate={currentDate}
-                  setCurrentDate={setCurrentDate}
-                  onAddShift={handleAddShift}
-                  onDeleteShift={handleDeleteShift}
-                />
+                  <button
+                    onClick={() => setLeitungTab('OVERTIME')}
+                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      leitungTab === 'OVERTIME'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Überstunden-Tracking</span>
+                  </button>
 
-                {/* 4. Mitarbeiter- & Qualifikationsverwaltung */}
-                <StaffManagement
-                  staffList={staffList}
-                  groups={groups}
-                  onAddStaff={handleAddStaff}
-                />
+                  <button
+                    onClick={() => setLeitungTab('STAFF')}
+                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      leitungTab === 'STAFF'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Personal- & Accounts</span>
+                  </button>
+                </div>
+
+                {/* Sub-view 1: DASHBOARD & LIVE-RADAR */}
+                {leitungTab === 'DASHBOARD' && (
+                  <>
+                    <RatioRadar
+                      groupsStatus={ratioStatus}
+                      date={format(currentDate, 'EEEE, dd.MM.yyyy')}
+                    />
+                    <ApprovalCenter
+                      approvals={approvals}
+                      onDecide={handleDecideApproval}
+                      onRefresh={loadAllData}
+                    />
+                  </>
+                )}
+
+                {/* Sub-view 2: SCHICHTPLANUNG */}
+                {leitungTab === 'ROSTER' && (
+                  <ShiftPlanner
+                    shifts={shifts}
+                    staff={staffList}
+                    groups={groups}
+                    currentDate={currentDate}
+                    setCurrentDate={setCurrentDate}
+                    onAddShift={handleAddShift}
+                    onDeleteShift={handleDeleteShift}
+                  />
+                )}
+
+                {/* Sub-view 3: ÜBERSTUNDEN-TRACKING */}
+                {leitungTab === 'OVERTIME' && (
+                  <OvertimeTracker
+                    staffList={staffList}
+                    onRefresh={loadAllData}
+                  />
+                )}
+
+                {/* Sub-view 4: PERSONAL & ACCOUNTS */}
+                {leitungTab === 'STAFF' && (
+                  <StaffManagement
+                    staffList={staffList}
+                    groups={groups}
+                    onAddStaff={handleAddStaff}
+                    onUpdateStaff={handleUpdateStaff}
+                    onRefresh={loadAllData}
+                  />
+                )}
               </div>
             )}
 
-            {/* VIEW 2: MITARBEITER APP (Mobile Smartphone View) */}
+            {/* VIEW 2: MITARBEITER-APP */}
             {currentView === 'MOBILE' && (
               <MobileAppView
                 staffList={staffList}

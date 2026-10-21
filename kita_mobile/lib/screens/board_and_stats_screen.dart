@@ -21,6 +21,7 @@ class BoardAndStatsScreen extends StatefulWidget {
 class _BoardAndStatsScreenState extends State<BoardAndStatsScreen> {
   StaffStatsModel? _stats;
   List<AnnouncementModel> _announcements = [];
+  List<AuditLogModel> _auditLogs = [];
   bool _loading = true;
 
   @override
@@ -34,12 +35,14 @@ class _BoardAndStatsScreenState extends State<BoardAndStatsScreen> {
     final results = await Future.wait([
       ApiService.getStaffStats(widget.currentUser.id),
       ApiService.getAnnouncements(),
+      ApiService.getAuditLogs(widget.currentUser.id),
     ]);
 
     if (mounted) {
       setState(() {
         _stats = results[0] as StaffStatsModel;
         _announcements = results[1] as List<AnnouncementModel>;
+        _auditLogs = results[2] as List<AuditLogModel>;
         _loading = false;
       });
     }
@@ -129,7 +132,62 @@ class _BoardAndStatsScreenState extends State<BoardAndStatsScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // 2. PINNWAND (Aushänge der Leitung)
+                  // 2. ÄNDERUNGEN DURCH DIE LEITUNG (Transparenz-Log)
+                  const Row(
+                    children: [
+                      Icon(Icons.notifications_active, color: Color(0xFF4F46E5), size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Änderungen durch die Leitung',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (_auditLogs.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: const Text('Keine Änderungen protokolliert.', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    )
+                  else
+                    ..._auditLogs.map((log) => Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE0E7FF)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(log.title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E1B4B))),
+                                  Text(
+                                    log.createdAt.length >= 10 ? log.createdAt.substring(0, 10) : '',
+                                    style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(log.description, style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                              const SizedBox(height: 4),
+                              Text('Eingetragen von: ${log.changedBy}', style: const TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Color(0xFF6366F1))),
+                            ],
+                          ),
+                        )),
+
+                  const SizedBox(height: 20),
+
+                  // 3. PINNWAND (Aushänge der Leitung)
                   const Row(
                     children: [
                       Icon(Icons.campaign, color: Color(0xFF2563EB), size: 20),

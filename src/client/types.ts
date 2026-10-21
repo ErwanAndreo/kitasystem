@@ -9,12 +9,16 @@ export interface Staff {
   qualification: string;
   is_fachkraft: number;
   weekly_hours: number;
+  work_days: number;
+  annual_vacation_days: number;
   target_group_id: string | null;
   pin: string;
   avatar: string;
   color: string;
+  is_active: number;
   clock_status?: 'CLOCKED_IN' | 'IN_BREAK' | 'COMPLETED' | null;
   current_absence?: 'SICK' | 'VACATION' | 'TRAINING' | null;
+  unread_notifications_count?: number;
 }
 
 export interface Group {
@@ -94,16 +98,37 @@ export interface Approval {
   target_role?: Role | null;
 }
 
-export interface Timelog {
+export interface OvertimeAdjustment {
   id: string;
   staff_id: string;
+  hours: number;
+  reason: string;
   date: string;
-  clock_in: string;
-  clock_out: string | null;
-  break_minutes: number;
-  status: 'CLOCKED_IN' | 'IN_BREAK' | 'COMPLETED';
-  note: string | null;
-  staff_name: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface StaffAuditLog {
+  id: string;
+  staff_id: string;
+  category: 'SHIFT_CHANGE' | 'OVERTIME_ADJUSTMENT' | 'HOURS_CHANGE' | 'APPROVAL';
+  title: string;
+  description: string;
+  changed_by: string;
+  created_at: string;
+  is_read: number;
+}
+
+export interface TimeOverviewItem {
+  staff_id: string;
+  name: string;
   role: Role;
+  avatar: string;
   color: string;
+  weekly_hours: number;
+  target_month_hours: number;
+  actual_hours: number;
+  adjustments_hours: number;
+  overtime_hours: number;
+  remaining_vacation: number;
 }
