@@ -9,7 +9,12 @@ import {
   User, 
   AlertTriangle,
   Calendar,
-  Filter
+  Filter,
+  Baby,
+  HeartPulse,
+  GraduationCap,
+  Sparkles,
+  ShieldCheck
 } from 'lucide-react';
 import { format, addDays, startOfWeek, subWeeks, addWeeks } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -49,13 +54,15 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
     start_time: string;
     end_time: string;
     break_minutes: number;
+    role_override?: string;
   }>({
     staff_id: staff[0]?.id || '',
     group_id: groups[0]?.id || '',
     date: format(new Date(), 'yyyy-MM-dd'),
     start_time: '08:00',
     end_time: '16:30',
-    break_minutes: 30
+    break_minutes: 30,
+    role_override: ''
   });
 
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
@@ -67,13 +74,16 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   });
 
   const handleOpenNewShift = (staffId?: string, dateStr?: string) => {
+    const sObj = staff.find(s => s.id === (staffId || staff[0]?.id));
+    const defaultRoleOverride = sObj?.role === 'LEITUNG' ? 'Springer / Notfall-Unterstützung' : '';
     setModalData({
       staff_id: staffId || staff[0]?.id || '',
       group_id: selectedGroup !== 'ALL' ? selectedGroup : groups[0]?.id || '',
       date: dateStr || format(new Date(), 'yyyy-MM-dd'),
       start_time: '08:00',
       end_time: '16:30',
-      break_minutes: 30
+      break_minutes: 30,
+      role_override: defaultRoleOverride
     });
     setModalOpen(true);
   };
@@ -179,10 +189,10 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               return (
                 <tr key={person.id} className="hover:bg-slate-50/60 transition-colors">
                   {/* Staff Info Col */}
-                  <td className="p-3">
-                    <div className="flex items-center space-x-2.5">
+                  <td className="p-3 w-56">
+                    <div className="flex items-start space-x-2.5">
                       <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-xs shrink-0"
+                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-xs shrink-0 mt-0.5"
                         style={{ backgroundColor: person.color }}
                       >
                         {person.avatar}
@@ -191,12 +201,49 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                         <div className="text-xs font-bold text-slate-900 truncate">
                           {person.name}
                         </div>
-                        <div className="flex items-center space-x-1 text-[10px] text-slate-400">
+                        <div className="flex items-center space-x-1 text-[10px] text-slate-400 mt-0.5">
                           <span className={isFachkraft ? 'text-blue-600 font-semibold' : 'text-slate-500'}>
-                            {isFachkraft ? 'Fachkraft' : 'Ergänzungskraft'}
+                            {person.role === 'LEITUNG' ? 'Leitung' : isFachkraft ? 'Fachkraft' : 'Ergänzungskraft'}
                           </span>
                           <span>•</span>
                           <span>{person.weekly_hours}h</span>
+                        </div>
+
+                        {/* Personelle Skills & Rollen-Pills */}
+                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                          {person.role === 'LEITUNG' && (
+                            <span title="Einrichtungsleitung (kann im Notfall einspringen)" className="inline-flex items-center px-1 py-0.2 rounded bg-indigo-100 text-indigo-700 text-[9px] font-bold">
+                              ⭐ Leitung
+                            </span>
+                          )}
+                          {person.role === 'SPRINGER' && (
+                            <span title="Dedizierte Springerin" className="inline-flex items-center px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold">
+                              🔄 Springer
+                            </span>
+                          )}
+                          {person.skills?.includes('U3_QUALIFIKATION') && (
+                            <span title="U3-Qualifikation" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-purple-100 text-purple-700 text-[9px] font-bold">
+                              <Baby className="w-2.5 h-2.5" />
+                              <span>U3</span>
+                            </span>
+                          )}
+                          {person.skills?.includes('ERSTE_HILFE_KIND') && (
+                            <span title="Ersthelfer am Kind" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-rose-100 text-rose-700 text-[9px] font-bold">
+                              <HeartPulse className="w-2.5 h-2.5" />
+                              <span>EH</span>
+                            </span>
+                          )}
+                          {person.skills?.includes('INKLUSION') && (
+                            <span title="Inklusionsfachkraft" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-amber-100 text-amber-700 text-[9px] font-bold">
+                              <GraduationCap className="w-2.5 h-2.5" />
+                              <span>Inkl</span>
+                            </span>
+                          )}
+                          {person.can_spring === 1 && person.role !== 'SPRINGER' && person.role !== 'LEITUNG' && (
+                            <span title="Kann flexibel einspringen" className="inline-flex items-center px-1 py-0.2 rounded bg-teal-100 text-teal-700 text-[9px] font-semibold">
+                              Springer-Aktiv
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -245,11 +292,23 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                                       <Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-600" />
                                     </button>
                                   </div>
-                                  <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                                    {sh.group_name.split(' ')[0]}
+                                  <div className="flex items-center space-x-1 mt-0.5">
+                                    <span className="text-[10px] text-slate-600 truncate font-medium">
+                                      {sh.group_name.split(' ')[0]}
+                                    </span>
+                                    {sh.group_name.includes('U3') && (
+                                      <span className="text-[8px] bg-purple-100 text-purple-700 px-1 rounded font-bold">
+                                        U3
+                                      </span>
+                                    )}
                                   </div>
+                                  {sh.role_override && (
+                                    <span className="text-[9px] bg-indigo-100 text-indigo-700 font-bold px-1 rounded block mt-0.5 no-underline">
+                                      {sh.role_override}
+                                    </span>
+                                  )}
                                   {isCancelled && (
-                                    <span className="text-[9px] text-rose-700 font-bold block no-underline">
+                                    <span className="text-[9px] text-rose-700 font-bold block no-underline mt-0.5">
                                       Ausfall (Krank)
                                     </span>
                                   )}
@@ -344,6 +403,19 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Besondere Funktion / Rolle in dieser Schicht (optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="z.B. Springer U3, Vertretung, Frühdienst..."
+                  value={modalData.role_override || ''}
+                  onChange={(e) => setModalData({ ...modalData, role_override: e.target.value })}
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                />
               </div>
 
               {/* ArbZG Hint */}

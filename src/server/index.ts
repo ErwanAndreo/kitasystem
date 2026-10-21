@@ -18,7 +18,7 @@ app.use(express.json());
 initDb();
 
 // ---------------------------------------------------------------------------
-// 1. STAFF MANAGEMENT (ACCOUNTS, CONTRACTS, WOCHENSTUNDEN)
+// 1. STAFF MANAGEMENT (ACCOUNTS, CONTRACTS, SKILLS & SECONDARY ROLES)
 // ---------------------------------------------------------------------------
 app.get('/api/staff', (req, res) => {
   try {
@@ -31,19 +31,24 @@ app.get('/api/staff', (req, res) => {
       FROM staff s
       WHERE s.is_active = 1
       ORDER BY s.role = 'LEITUNG' DESC, s.name ASC
-    `).all(today, today);
+    `).all(today, today).map((s: any) => ({
+      ...s,
+      skills: JSON.parse(s.skills || '[]'),
+      secondary_roles: JSON.parse(s.secondary_roles || '[]')
+    }));
+
     res.json(staffList);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Create new staff account
 app.post('/api/staff', (req, res) => {
   try {
     const { 
       name, email, phone, role, qualification, is_fachkraft, 
-      weekly_hours, work_days, annual_vacation_days, target_group_id, pin, color 
+      weekly_hours, work_days, annual_vacation_days, target_group_id, pin, color,
+      skills, secondary_roles, can_spring
     } = req.body;
 
     const id = 's_' + Date.now();
@@ -52,16 +57,19 @@ app.post('/api/staff', (req, res) => {
     db.prepare(`
       INSERT INTO staff (
         id, name, email, phone, role, qualification, is_fachkraft, 
-        weekly_hours, work_days, annual_vacation_days, target_group_id, pin, avatar, color, is_active
+        weekly_hours, work_days, annual_vacation_days, target_group_id, pin, avatar, color, is_active,
+        skills, secondary_roles, can_spring
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
     `).run(
       id, name, email, phone || '', role, qualification, is_fachkraft ? 1 : 0, 
       weekly_hours || 39.0, work_days || 5, annual_vacation_days || 30, target_group_id || null, 
-      pin || '1234', avatar, color || '#16a34a'
+      pin || '1234', avatar, color || '#16a34a',
+      JSON.stringify(skills || ['FACHKRAFT', 'ERSTE_HILFE_KIND']),
+      JSON.stringify(secondary_roles || []),
+      can_spring ? 1 : 0
     );
 
-    // Write audit log entry
     const logId = 'log_' + Date.now();
     db.prepare(`
       INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
@@ -78,13 +86,13 @@ app.post('/api/staff', (req, res) => {
   }
 });
 
-// Update staff account & contract (Wochenstunden, Urlaubstage, etc.)
 app.put('/api/staff/:id', (req, res) => {
   try {
     const staffId = req.params.id;
     const { 
       name, email, phone, role, qualification, is_fachkraft, 
-      weekly_hours, work_days, annual_vacation_days, target_group_id, pin, color 
+      weekly_hours, work_days, annual_vacation_days, target_group_id, pin, color,
+      skills, secondary_roles, can_spring
     } = req.body;
 
     const existing = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId) as any;
@@ -93,15 +101,16 @@ app.put('/api/staff/:id', (req, res) => {
     db.prepare(`
       UPDATE staff SET 
         name = ?, email = ?, phone = ?, role = ?, qualification = ?, is_fachkraft = ?,
-        weekly_hours = ?, work_days = ?, annual_vacation_days = ?, target_group_id = ?, pin = ?, color = ?
+        weekly_hours = ?, work_days = ?, annual_vacation_days = ?, target_group_id = ?, pin = ?, color = ?,
+        skills = ?, secondary_roles = ?, can_spring = ?
       WHERE id = ?
     `).run(
       name, email, phone, role, qualification, is_fachkraft ? 1 : 0,
       weekly_hours, work_days || 5, annual_vacation_days || 30, target_group_id || null, pin || '1234', color || '#16a34a',
+      JSON.stringify(skills || []), JSON.stringify(secondary_roles || []), can_spring ? 1 : 0,
       staffId
     );
 
-    // Audit log if weekly hours or vacation changed
     if (existing.weekly_hours !== weekly_hours || existing.annual_vacation_days !== annual_vacation_days) {
       const logId = 'log_' + Date.now();
       db.prepare(`
@@ -109,7 +118,7 @@ app.put('/api/staff/:id', (req, res) => {
         VALUES (?, ?, 'HOURS_CHANGE', 'Vertragliche Wochenstunden angepasst', ?, 'Sabine Weber (Leitung)', ?, 0)
       `).run(
         logId, staffId,
-        `Deine Wochenstunden wurden von ${existing.weekly_hours}h auf ${weekly_hours}h angepasst (Urlaub: ${annual_vacation_days} Tage).`,
+        `Deine Wochenstunden wurden von ${existing.weekly_hours}h auf ${weekly_hours}h angepasst.`,
         new Date().toISOString()
       );
     }
@@ -120,7 +129,6 @@ app.put('/api/staff/:id', (req, res) => {
   }
 });
 
-// Deactivate staff
 app.delete('/api/staff/:id', (req, res) => {
   try {
     db.prepare('UPDATE staff SET is_active = 0 WHERE id = ?').run(req.params.id);
@@ -140,7 +148,6 @@ app.get('/api/staff/:id/stats', (req, res) => {
     const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId) as any;
     if (!staff) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
 
-    // Calculate worked minutes from time logs
     const logs = db.prepare(`
       SELECT * FROM timelogs 
       WHERE staff_id = ? AND date LIKE ? AND clock_out IS NOT NULL
@@ -154,7 +161,6 @@ app.get('/api/staff/:id/stats', (req, res) => {
       if (worked > 0) totalMinutes += worked;
     });
 
-    // Sum manual adjustments (e.g. Elternabend, Zeitausgleich)
     const adjustments = db.prepare(`
       SELECT COALESCE(SUM(hours), 0) as total_adj FROM overtime_adjustments
       WHERE staff_id = ? AND date LIKE ?
@@ -182,14 +188,15 @@ app.get('/api/staff/:id/stats', (req, res) => {
       adjustments_hours: adjustments.total_adj,
       overtime_hours: overtimeHours,
       remaining_vacation_days: remainingVacationDays,
-      total_vacation_days: staff.annual_vacation_days || 30
+      total_vacation_days: staff.annual_vacation_days || 30,
+      skills: JSON.parse(staff.skills || '[]'),
+      secondary_roles: JSON.parse(staff.secondary_roles || '[]')
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Comprehensive time overview for all staff (Leitung Dashboard)
 app.get('/api/time-overview', (req, res) => {
   try {
     const month = (req.query.month as string) || format(new Date(), 'yyyy-MM');
@@ -239,11 +246,10 @@ app.get('/api/time-overview', (req, res) => {
   }
 });
 
-// Leitung adds an overtime adjustment (Gutschrift oder Ausgleich)
 app.post('/api/staff/:id/overtime-adjustment', (req, res) => {
   try {
     const staffId = req.params.id;
-    const { hours, reason, date } = req.body; // hours can be positive (e.g. +2.5) or negative (e.g. -8.0)
+    const { hours, reason, date } = req.body;
     const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId) as any;
     if (!staff) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
 
@@ -256,7 +262,6 @@ app.post('/api/staff/:id/overtime-adjustment', (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(adjId, staffId, Number(hours), reason, effectiveDate, createdBy, new Date().toISOString());
 
-    // Write audit log entry so employee sees it!
     const logId = 'log_' + Date.now();
     const sign = Number(hours) >= 0 ? '+' : '';
     db.prepare(`
@@ -290,7 +295,7 @@ app.get('/api/staff/:id/overtime-adjustments', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. MITARBEITER-TRANSPARENZ: ÄNDERUNGSHISTORIE & BENACHRICHTIGUNGEN
+// 3. AUDIT LOG & TRANSPARENZ
 // ---------------------------------------------------------------------------
 app.get('/api/staff/:id/audit-log', (req, res) => {
   try {
@@ -315,14 +320,199 @@ app.post('/api/audit-log/:id/read', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. SHIFTS & DIENSTPLAN (MIT AUTOMATISCHEM ÄNDERUNGSPROTOKOLL)
+// 4. SMART RATIO & SKILLS ENGINE (BERÜCKSICHTIGT FACHKRÄFTE, U3-SKILLS & ERSTHELFER)
+// ---------------------------------------------------------------------------
+app.get('/api/groups', (req, res) => {
+  try {
+    const groups = db.prepare('SELECT * FROM groups ORDER BY name ASC').all().map((g: any) => ({
+      ...g,
+      required_skills: JSON.parse(g.required_skills || '[]')
+    }));
+    res.json(groups);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ratio-status', (req, res) => {
+  try {
+    const date = (req.query.date as string) || format(new Date(), 'yyyy-MM-dd');
+    const groups = db.prepare('SELECT * FROM groups').all() as any[];
+
+    // Check facility-wide First-Aid requirement
+    const allFacilityActiveShifts = db.prepare(`
+      SELECT s.*, st.name as staff_name, st.skills
+      FROM shifts s
+      JOIN staff st ON s.staff_id = st.id
+      WHERE s.date = ? AND s.status = 'CONFIRMED'
+    `).all(date) as any[];
+
+    const hasFacilityFirstAid = allFacilityActiveShifts.some(s => {
+      const skills = JSON.parse(s.skills || '[]');
+      return skills.includes('ERSTE_HILFE_KIND');
+    });
+
+    const ratioStatus = groups.map(group => {
+      const requiredSkills: string[] = JSON.parse(group.required_skills || '[]');
+
+      const activeShifts = db.prepare(`
+        SELECT s.*, st.name as staff_name, st.role, st.is_fachkraft, st.qualification,
+               st.skills, st.secondary_roles, st.can_spring
+        FROM shifts s
+        JOIN staff st ON s.staff_id = st.id
+        WHERE s.group_id = ? AND s.date = ? AND s.status = 'CONFIRMED'
+      `).all(group.id, date).map((s: any) => ({
+        ...s,
+        skills: JSON.parse(s.skills || '[]'),
+        secondary_roles: JSON.parse(s.secondary_roles || '[]')
+      }));
+
+      const totalStaff = activeShifts.length;
+      const fachkraefte = activeShifts.filter((s: any) => s.is_fachkraft === 1).length;
+      const ergaenzungskraefte = totalStaff - fachkraefte;
+
+      const actualRatio = totalStaff > 0 ? parseFloat((group.child_count / totalStaff).toFixed(2)) : 99;
+      const fachkraftPercent = totalStaff > 0 ? fachkraefte / totalStaff : 0;
+
+      // Skill validation
+      const presentSkills = new Set<string>();
+      activeShifts.forEach((s: any) => s.skills.forEach((sk: string) => presentSkills.add(sk)));
+
+      const missingSkills = requiredSkills.filter(reqSkill => !presentSkills.has(reqSkill));
+
+      let status = 'OPTIMAL';
+      let message = 'Betreuungsschlüssel & personelle Skills erfüllt.';
+
+      if (totalStaff === 0) {
+        status = 'CRITICAL';
+        message = 'AKUTER NOTSTAND: Keine Aufsichtsperson in der Gruppe!';
+      } else if (actualRatio > group.target_ratio) {
+        status = 'CRITICAL';
+        message = `Unterbesetzung: 1:${actualRatio} (Gesetzliches Limit: 1:${group.target_ratio})`;
+      } else if (missingSkills.length > 0) {
+        status = 'CRITICAL';
+        message = `Skill-Verstoß: Fehlende Qualifikation (${missingSkills.join(', ')})!`;
+      } else if (fachkraftPercent < group.min_fachkraft_percent) {
+        status = 'WARNING';
+        message = `Fachkraftquote unterschritten: ${(fachkraftPercent * 100).toFixed(0)}% (Min: ${(group.min_fachkraft_percent * 100).toFixed(0)}%)`;
+      } else if (!hasFacilityFirstAid) {
+        status = 'WARNING';
+        message = 'Achtung: Kein zertifizierter Ersthelfer am Kind im Haus anwesend!';
+      } else if (actualRatio > group.target_ratio * 0.9) {
+        status = 'WARNING';
+        message = `Puffer sehr gering: 1:${actualRatio}. Pausenzeiten versetzen!`;
+      }
+
+      return {
+        group_id: group.id,
+        group_name: group.name,
+        group_type: group.type,
+        child_count: group.child_count,
+        target_ratio: group.target_ratio,
+        actual_ratio: actualRatio,
+        min_fachkraft_percent: group.min_fachkraft_percent,
+        actual_fachkraft_percent: fachkraftPercent,
+        required_skills: requiredSkills,
+        missing_skills: missingSkills,
+        total_staff: totalStaff,
+        fachkraefte,
+        ergaenzungskraefte,
+        status,
+        message,
+        staff: activeShifts
+      };
+    });
+
+    res.json({ date, has_first_aid: hasFacilityFirstAid, groups: ratioStatus });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Intelligent substitute / springer finder with skill matching
+app.get('/api/emergency/suggestions', (req, res) => {
+  try {
+    const { group_id, date } = req.query;
+    const targetDate = (date as string) || format(new Date(), 'yyyy-MM-dd');
+    const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(group_id) as any;
+    if (!group) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+
+    const requiredSkills: string[] = JSON.parse(group.required_skills || '[]');
+
+    // Get all active staff
+    const allStaff = db.prepare('SELECT * FROM staff WHERE is_active = 1').all() as any[];
+
+    // Check who is already working today
+    const busyStaffIds = new Set(
+      db.prepare("SELECT staff_id FROM shifts WHERE date = ? AND status = 'CONFIRMED'")
+        .all(targetDate)
+        .map((s: any) => s.staff_id)
+    );
+
+    const suggestions = allStaff.map((staff: any) => {
+      const skills: string[] = JSON.parse(staff.skills || '[]');
+      const secondaryRoles: string[] = JSON.parse(staff.secondary_roles || '[]');
+      const isAlreadyWorking = busyStaffIds.has(staff.id);
+
+      // Calculate skill match score
+      let score = 50;
+      const matchingSkills = requiredSkills.filter(r => skills.includes(r));
+      const hasAllRequired = requiredSkills.every(r => skills.includes(r));
+
+      if (hasAllRequired) score += 40;
+      if (staff.is_fachkraft === 1) score += 20;
+      if (staff.can_spring === 1) score += 25;
+      if (staff.role === 'SPRINGER') score += 30;
+      if (staff.role === 'LEITUNG') score += 15; // Leitung can spring in emergency
+      if (isAlreadyWorking) score -= 50; // Already scheduled somewhere
+
+      let note = '';
+      if (staff.role === 'LEITUNG') {
+        note = 'Primär Leitung (Büro) – kann bei akutem Notstand als voll anerkannte Fachkraft in die Gruppe springen!';
+      } else if (staff.role === 'SPRINGER') {
+        note = 'Einsatzbereite Springerin mit vollem Skill-Match.';
+      } else if (staff.is_fachkraft === 1) {
+        note = `Anerkannte Fachkraft (${skills.join(', ')}).`;
+      } else {
+        note = 'Ergänzungskraft zur reinen Kopfzahl-Unterstützung (keine Gruppenleitung).';
+      }
+
+      return {
+        staff_id: staff.id,
+        name: staff.name,
+        role: staff.role,
+        qualification: staff.qualification,
+        is_fachkraft: staff.is_fachkraft === 1,
+        can_spring: staff.can_spring === 1,
+        skills,
+        secondary_roles: secondaryRoles,
+        matching_skills: matchingSkills,
+        has_all_required: hasAllRequired,
+        is_already_working: isAlreadyWorking,
+        score,
+        note
+      };
+    }).sort((a, b) => b.score - a.score);
+
+    res.json({
+      group: group.name,
+      required_skills: requiredSkills,
+      suggestions
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 5. SHIFTS & DIENSTPLAN
 // ---------------------------------------------------------------------------
 app.get('/api/shifts', (req, res) => {
   try {
     const { start, end, group_id, staff_id } = req.query;
     let query = `
       SELECT s.*, st.name as staff_name, st.role as staff_role, st.is_fachkraft, st.color as staff_color,
-             g.name as group_name, g.color as group_color
+             st.skills as staff_skills, g.name as group_name, g.color as group_color
       FROM shifts s
       JOIN staff st ON s.staff_id = st.id
       JOIN groups g ON s.group_id = g.id
@@ -344,7 +534,11 @@ app.get('/api/shifts', (req, res) => {
     }
 
     query += ` ORDER BY s.date ASC, s.start_time ASC`;
-    const shifts = db.prepare(query).all(...params);
+    const shifts = db.prepare(query).all(...params).map((sh: any) => ({
+      ...sh,
+      staff_skills: JSON.parse(sh.staff_skills || '[]')
+    }));
+
     res.json(shifts);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -353,10 +547,9 @@ app.get('/api/shifts', (req, res) => {
 
 app.post('/api/shifts', (req, res) => {
   try {
-    const { staff_id, group_id, date, start_time, end_time, break_minutes } = req.body;
+    const { staff_id, group_id, date, start_time, end_time, break_minutes, role_override } = req.body;
     const id = 'shift_' + Date.now();
 
-    // Check ArbZG
     const prevDayShifts = db.prepare(`
       SELECT end_time FROM shifts
       WHERE staff_id = ? AND date = date(?, '-1 day') AND status = 'CONFIRMED'
@@ -374,11 +567,10 @@ app.post('/api/shifts', (req, res) => {
     }
 
     db.prepare(`
-      INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED')
-    `).run(id, staff_id, group_id, date, start_time, end_time, break_minutes || 30);
+      INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status, role_override)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?)
+    `).run(id, staff_id, group_id, date, start_time, end_time, break_minutes || 30, role_override || null);
 
-    // Write audit log entry for employee transparency!
     const group = db.prepare('SELECT name FROM groups WHERE id = ?').get(group_id) as any;
     const logId = 'log_' + Date.now();
     db.prepare(`
@@ -400,7 +592,6 @@ app.delete('/api/shifts/:id', (req, res) => {
   try {
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id) as any;
     if (shift) {
-      // Audit log entry
       const logId = 'log_' + Date.now();
       db.prepare(`
         INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
@@ -419,125 +610,8 @@ app.delete('/api/shifts/:id', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. APPROVAL CENTER & PINNWAND & RATIO STATUS
+// 6. APPROVALS & NOTFALL-TRIGGER
 // ---------------------------------------------------------------------------
-app.get('/api/groups', (req, res) => {
-  try {
-    const groups = db.prepare('SELECT * FROM groups ORDER BY name ASC').all();
-    res.json(groups);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/groups/:id/details', (req, res) => {
-  try {
-    const groupId = req.params.id;
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(groupId) as any;
-    if (!group) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
-
-    const notes = db.prepare('SELECT * FROM group_notes WHERE group_id = ?').all(groupId);
-    const todayStaff = db.prepare(`
-      SELECT s.*, st.name as staff_name, st.role, st.is_fachkraft, st.avatar, st.color
-      FROM shifts s
-      JOIN staff st ON s.staff_id = st.id
-      WHERE s.group_id = ? AND s.date = ? AND s.status = 'CONFIRMED'
-    `).all(groupId, today);
-
-    res.json({ group, notes, today_staff: todayStaff });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/announcements', (req, res) => {
-  try {
-    const announcements = db.prepare('SELECT * FROM announcements ORDER BY priority = "HIGH" DESC, date DESC').all();
-    res.json(announcements);
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/announcements', (req, res) => {
-  try {
-    const { title, content, priority } = req.body;
-    const id = 'ann_' + Date.now();
-    const today = format(new Date(), 'dd.MM.yyyy');
-
-    db.prepare(`
-      INSERT INTO announcements (id, title, content, priority, author, date)
-      VALUES (?, ?, ?, ?, 'Sabine Weber (Leitung)', ?)
-    `).run(id, title, content, priority || 'NORMAL', today);
-
-    res.status(201).json({ success: true, id });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/ratio-status', (req, res) => {
-  try {
-    const date = (req.query.date as string) || format(new Date(), 'yyyy-MM-dd');
-    const groups = db.prepare('SELECT * FROM groups').all() as any[];
-
-    const ratioStatus = groups.map(group => {
-      const activeShifts = db.prepare(`
-        SELECT s.*, st.name as staff_name, st.role, st.is_fachkraft, st.qualification
-        FROM shifts s
-        JOIN staff st ON s.staff_id = st.id
-        WHERE s.group_id = ? AND s.date = ? AND s.status = 'CONFIRMED'
-      `).all(group.id, date) as any[];
-
-      const totalStaff = activeShifts.length;
-      const fachkraefte = activeShifts.filter(s => s.is_fachkraft === 1).length;
-      const ergaenzungskraefte = totalStaff - fachkraefte;
-
-      const actualRatio = totalStaff > 0 ? parseFloat((group.child_count / totalStaff).toFixed(2)) : 99;
-      const fachkraftPercent = totalStaff > 0 ? fachkraefte / totalStaff : 0;
-
-      let status = 'OPTIMAL';
-      let message = 'Betreuungsschlüssel erfüllt.';
-
-      if (totalStaff === 0) {
-        status = 'CRITICAL';
-        message = 'AKUTER NOTSTAND: Keine Aufsichtsperson in der Gruppe!';
-      } else if (actualRatio > group.target_ratio) {
-        status = 'CRITICAL';
-        message = `Unterbesetzung: 1:${actualRatio} (Gesetzliches Limit: 1:${group.target_ratio})`;
-      } else if (fachkraftPercent < group.min_fachkraft_percent) {
-        status = 'WARNING';
-        message = `Fachkraftquote unterschritten: ${(fachkraftPercent * 100).toFixed(0)}% (Min: ${(group.min_fachkraft_percent * 100).toFixed(0)}%)`;
-      } else if (actualRatio > group.target_ratio * 0.9) {
-        status = 'WARNING';
-        message = `Puffer sehr gering: 1:${actualRatio}. Pausenzeiten versetzen!`;
-      }
-
-      return {
-        group_id: group.id,
-        group_name: group.name,
-        group_type: group.type,
-        child_count: group.child_count,
-        target_ratio: group.target_ratio,
-        actual_ratio: actualRatio,
-        min_fachkraft_percent: group.min_fachkraft_percent,
-        actual_fachkraft_percent: fachkraftPercent,
-        total_staff: totalStaff,
-        fachkraefte,
-        ergaenzungskraefte,
-        status,
-        message,
-        staff: activeShifts
-      };
-    });
-
-    res.json({ date, groups: ratioStatus });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get('/api/approvals', (req, res) => {
   try {
     const status = req.query.status as string;
@@ -587,7 +661,6 @@ app.post('/api/approvals/:id/decide', (req, res) => {
 
       const details = JSON.parse(approval.details || '{}');
 
-      // Notify employee in audit log
       const logId = 'log_' + Date.now();
       db.prepare(`
         INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
@@ -608,10 +681,11 @@ app.post('/api/approvals/:id/decide', (req, res) => {
         if (approval.type === 'EMERGENCY_REPLACEMENT') {
           const today = format(new Date(), 'yyyy-MM-dd');
           const newShiftId = 'shift_emerg_' + Date.now();
+          const targetGrpId = details.target_group_id || 'g_u3_maeuse';
           db.prepare(`
             INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status)
-            VALUES (?, ?, 'g_u3_maeuse', ?, '08:30', '15:30', 30, 'CONFIRMED')
-          `).run(newShiftId, approval.requester_id, today);
+            VALUES (?, ?, ?, ?, '08:00', '15:30', 30, 'CONFIRMED')
+          `).run(newShiftId, approval.requester_id, targetGrpId, today);
         }
 
         if (approval.type === 'VACATION_REQUEST') {
@@ -687,8 +761,99 @@ app.post('/api/approvals/request-vacation', (req, res) => {
   }
 });
 
+// Emergency Trigger with Skill-Aware Replacement Proposal
+app.post('/api/emergency/trigger-sick', (req, res) => {
+  try {
+    const { staff_id, days, reason, substitute_id } = req.body;
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const staffMember = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff_id) as any;
+    if (!staffMember) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
+
+    const absenceId = 'abs_' + Date.now();
+    db.prepare(`
+      INSERT INTO absences (id, staff_id, type, start_date, end_date, status, reason, created_at)
+      VALUES (?, ?, 'SICK', ?, ?, 'APPROVED', ?, ?)
+    `).run(absenceId, staff_id, today, today, reason || 'Akute Krankmeldung', new Date().toISOString());
+
+    // Find if the person had a confirmed shift today to find group
+    const todayShift = db.prepare("SELECT * FROM shifts WHERE staff_id = ? AND date = ? AND status = 'CONFIRMED'").get(staff_id, today) as any;
+    db.prepare(`UPDATE shifts SET status = 'CANCELLED' WHERE staff_id = ? AND date = ?`).run(staff_id, today);
+
+    // Target group is either from today's shift or their default group
+    const targetGroupId = todayShift?.group_id || staffMember.target_group_id || 'g_u3_maeuse';
+    const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(targetGroupId) as any;
+    const requiredSkills: string[] = JSON.parse(group?.required_skills || '[]');
+
+    const allStaff = db.prepare('SELECT * FROM staff WHERE is_active = 1 AND id != ?').all(staff_id) as any[];
+    const busyStaffIds = new Set(
+      db.prepare("SELECT staff_id FROM shifts WHERE date = ? AND status = 'CONFIRMED'")
+        .all(today)
+        .map((s: any) => s.staff_id)
+    );
+
+    let chosenStaff: any = null;
+    let chosenSkills: string[] = [];
+
+    if (substitute_id) {
+      chosenStaff = db.prepare('SELECT * FROM staff WHERE id = ?').get(substitute_id);
+      if (chosenStaff) {
+        chosenSkills = JSON.parse(chosenStaff.skills || '[]');
+      }
+    }
+
+    if (!chosenStaff) {
+      // Rank candidates by skill-match and role
+      const candidates = allStaff.map((s: any) => {
+        const skills = JSON.parse(s.skills || '[]');
+        const hasAllSkills = requiredSkills.every(req => skills.includes(req));
+        const isFree = !busyStaffIds.has(s.id);
+        let score = 0;
+        if (isFree) score += 50;
+        if (hasAllSkills) score += 40;
+        if (s.can_spring === 1) score += 20;
+        if (s.role === 'SPRINGER') score += 20;
+        if (s.role === 'LEITUNG') score += 15;
+        return { staff: s, score, hasAllSkills, skills };
+      }).sort((a, b) => b.score - a.score);
+
+      if (candidates.length > 0) {
+        chosenStaff = candidates[0].staff;
+        chosenSkills = candidates[0].skills;
+      }
+    }
+
+    if (chosenStaff) {
+      const apprId = 'appr_emerg_' + Date.now();
+      const roleNote = chosenStaff.role === 'LEITUNG' 
+        ? 'Primär Leitung (Büro) – springt bei Notstand dank voller Fachkraft/U3-Qualifikation ein' 
+        : chosenStaff.role === 'SPRINGER' 
+        ? 'Dedizierte Springerin' 
+        : `${chosenStaff.role} (${chosenStaff.qualification})`;
+
+      const details = {
+        title: `Skill-Ersatz: ${chosenStaff.name} (${chosenStaff.role}) für ${staffMember.name}`,
+        description: `Ausfall von ${staffMember.name}. ${chosenStaff.name} [${roleNote}] erfüllt das Profil (${chosenSkills.join(', ')}) und kann als Vertretung einspringen.`,
+        target_group: group?.name || 'Krippe',
+        target_group_id: targetGroupId,
+        time: '08:00 - 15:30 Uhr',
+        skills_matched: chosenSkills,
+        ratio_impact: 'Stellt den gesetzlichen Betreuungsschlüssel & Fachkraftquote sofort wieder her.'
+      };
+
+      db.prepare(`
+        INSERT INTO approvals (id, type, requester_id, target_id, absence_id, details, status, created_at)
+        VALUES (?, 'EMERGENCY_REPLACEMENT', ?, ?, ?, ?, 'PENDING', ?)
+      `).run(apprId, chosenStaff.id, staffMember.id, absenceId, JSON.stringify(details), new Date().toISOString());
+    }
+
+    res.json({ success: true, message: `Krankmeldung für ${staffMember.name} erfasst. Skill-basierter Vertretungsvorschlag (${chosenStaff ? chosenStaff.name : 'Kein Springer verfügbar'}) liegt vor!` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---------------------------------------------------------------------------
-// 6. ZEITERFASSUNG & STEMPELN
+// 7. STEMPELUHR & PINNWAND & EXPORT
 // ---------------------------------------------------------------------------
 app.get('/api/timelogs', (req, res) => {
   try {
@@ -761,55 +926,15 @@ app.post('/api/timelogs/stamp', (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// 7. NOTFALL-ASSISTENT
-// ---------------------------------------------------------------------------
-app.post('/api/emergency/trigger-sick', (req, res) => {
+app.get('/api/announcements', (req, res) => {
   try {
-    const { staff_id, days, reason } = req.body;
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const staffMember = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff_id) as any;
-
-    const absenceId = 'abs_' + Date.now();
-    db.prepare(`
-      INSERT INTO absences (id, staff_id, type, start_date, end_date, status, reason, created_at)
-      VALUES (?, ?, 'SICK', ?, ?, 'APPROVED', ?, ?)
-    `).run(absenceId, staff_id, today, today, reason || 'Akute Krankmeldung', new Date().toISOString());
-
-    db.prepare(`UPDATE shifts SET status = 'CANCELLED' WHERE staff_id = ? AND date = ?`).run(staff_id, today);
-
-    const springers = db.prepare(`
-      SELECT * FROM staff 
-      WHERE (role = 'SPRINGER' OR target_group_id IS NULL)
-        AND id != ?
-        AND id NOT IN (SELECT staff_id FROM shifts WHERE date = ? AND status = 'CONFIRMED')
-    `).all(staff_id, today) as any[];
-
-    if (springers.length > 0) {
-      const bestSpringer = springers[0];
-      const apprId = 'appr_emerg_' + Date.now();
-      const details = {
-        title: `Notfall-Ersatz: ${bestSpringer.name} für ${staffMember.name}`,
-        description: `Akuter Krankheitsausfall von ${staffMember.name}. Springerin ${bestSpringer.name} ist verfügbar und kann sofort übernehmen.`,
-        target_group: staffMember.target_group_id || 'g_u3_maeuse',
-        time: '08:00 - 15:30 Uhr',
-        ratio_impact: 'Stellt den gesetzlichen Betreuungsschlüssel sofort wieder her.'
-      };
-      db.prepare(`
-        INSERT INTO approvals (id, type, requester_id, target_id, absence_id, details, status, created_at)
-        VALUES (?, 'EMERGENCY_REPLACEMENT', ?, ?, ?, ?, 'PENDING', ?)
-      `).run(apprId, bestSpringer.id, staffMember.id, absenceId, JSON.stringify(details), new Date().toISOString());
-    }
-
-    res.json({ success: true, message: `Krankmeldung für ${staffMember.name} erfasst. Notfall-Vorschlag an Freigabe-Center übermittelt.` });
+    const announcements = db.prepare('SELECT * FROM announcements ORDER BY priority = "HIGH" DESC, date DESC').all();
+    res.json(announcements);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------------------------------------------------------------------------
-// 8. DATEV EXPORT
-// ---------------------------------------------------------------------------
 app.get('/api/export/datev', (req, res) => {
   try {
     const month = (req.query.month as string) || format(new Date(), 'yyyy-MM');
@@ -857,7 +982,7 @@ app.get('/api/export/datev', (req, res) => {
   }
 });
 
-// Serve frontend
+// Serve frontend in production
 const clientDist = path.resolve(__dirname, '../../dist/client');
 app.use(express.static(clientDist));
 app.get('*', (req, res) => {

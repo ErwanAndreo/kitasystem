@@ -133,15 +133,15 @@ export const App: React.FC = () => {
   };
 
   // Emergency Trigger
-  const handleTriggerEmergency = async (staff_id: string, days: number, reason: string) => {
+  const handleTriggerEmergency = async (staff_id: string, days: number, reason: string, substitute_id?: string) => {
     const res = await fetch('/api/emergency/trigger-sick', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staff_id, days, reason })
+      body: JSON.stringify({ staff_id, days, reason, substitute_id })
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error);
-    showToast('🚨 Krankmeldung erfasst. Notfall-Vorschlag liegt im Freigabe-Center!');
+    showToast('🚨 Krankmeldung erfasst. Vertretungsvorschlag liegt im Freigabe-Center!');
     await loadAllData();
   };
 

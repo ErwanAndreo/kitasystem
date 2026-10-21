@@ -16,6 +16,9 @@ export interface Staff {
   avatar: string;
   color: string;
   is_active: number;
+  skills?: string[];
+  secondary_roles?: string[];
+  can_spring?: number;
   clock_status?: 'CLOCKED_IN' | 'IN_BREAK' | 'COMPLETED' | null;
   current_absence?: 'SICK' | 'VACATION' | 'TRAINING' | null;
   unread_notifications_count?: number;
@@ -44,6 +47,8 @@ export interface Shift {
   staff_role: Role;
   is_fachkraft: number;
   staff_color: string;
+  staff_skills?: string[];
+  role_override?: string | null;
   group_name: string;
   group_color: string;
 }
