@@ -11,7 +11,9 @@
     "build:client": "vite build",
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
-    "start": "NODE_ENV=production tsx src/server/index.ts"
+    "start": "node dist/server/index.js",
+    "backup": "curl -X POST http://localhost:3000/api/admin/backup",
+    "health": "curl -s http://localhost:3000/api/health"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",

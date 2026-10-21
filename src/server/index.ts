@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDb } from './db.js';
 import { format } from 'date-fns';
@@ -14,8 +15,69 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (req.path.startsWith('/api')) {
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path} -> ${res.statusCode} (${duration}ms)`);
+    }
+  });
+  next();
+});
+
 // Initialize SQLite database
 initDb();
+
+// ---------------------------------------------------------------------------
+// 0. HEALTH CHECK & SYSTEM DIAGNOSTICS
+// ---------------------------------------------------------------------------
+app.get('/api/health', (req, res) => {
+  try {
+    const dbCheck = db.prepare('SELECT 1 as ok').get() as { ok: number };
+    const staffCount = db.prepare('SELECT COUNT(*) as count FROM staff WHERE is_active = 1').get() as { count: number };
+    const shiftsCount = db.prepare('SELECT COUNT(*) as count FROM shifts WHERE date = ?').get(format(new Date(), 'yyyy-MM-dd')) as { count: number };
+    
+    res.json({
+      status: 'UP',
+      timestamp: new Date().toISOString(),
+      uptime_seconds: Math.floor(process.uptime()),
+      database: {
+        engine: 'SQLite3 (WAL mode)',
+        connected: dbCheck?.ok === 1,
+        active_staff: staffCount.count,
+        shifts_today: shiftsCount.count
+      },
+      system: {
+        node_version: process.version,
+        memory_usage_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+        platform: process.platform
+      }
+    });
+  } catch (err: any) {
+    res.status(503).json({
+      status: 'DOWN',
+      error: err.message,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// Hot live backup of SQLite database without locking
+app.post('/api/admin/backup', async (req, res) => {
+  try {
+    const backupDir = path.resolve(__dirname, '../../backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+    }
+    const backupPath = path.join(backupDir, `kita_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.sqlite`);
+    await db.backup(backupPath);
+    res.json({ success: true, backupPath, timestamp: new Date().toISOString() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // 1. STAFF MANAGEMENT (ACCOUNTS, CONTRACTS, SKILLS & SECONDARY ROLES)
@@ -997,6 +1059,40 @@ app.get('*', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 KitaPlaner Backend running at http://localhost:${PORT}`);
+// Global Error Handling Middleware
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error(`[ERROR] Unhandled error on ${req.method} ${req.path}:`, err);
+  res.status(500).json({
+    error: 'Interner Serverfehler',
+    message: err?.message || 'Unerwarteter Fehler'
+  });
 });
+
+const server = app.listen(PORT, () => {
+  console.log(`🚀 KitaPlaner Backend running at http://localhost:${PORT}`);
+  console.log(`🩺 Healthcheck: http://localhost:${PORT}/api/health`);
+});
+
+// Graceful Shutdown on SIGTERM and SIGINT
+const gracefulShutdown = (signal: string) => {
+  console.log(`\n🛑 Signal ${signal} empfangen. Beende KitaPlaner Server ordnungsgemäß...`);
+  server.close(() => {
+    console.log('HTTP Server geschlossen.');
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)');
+      db.close();
+      console.log('SQLite Datenbank sauber geschlossen (WAL getruncated).');
+    } catch (e) {
+      console.error('Fehler beim Schließen der Datenbank:', e);
+    }
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error('Erzwungener Abbruch nach 10 Sekunden Timeout.');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));

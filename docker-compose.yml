@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  kitaplaner:
+    build: .
+    container_name: kitaplaner-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      - kita_data:/app/data
+      - kita_backups:/app/backups
+
+volumes:
+  kita_data:
+  kita_backups:
