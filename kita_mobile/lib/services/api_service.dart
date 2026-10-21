@@ -205,6 +205,17 @@ class ApiService {
     }
   }
 
+  static Future<List<ClosureModel>> getClosures() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/closures')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        return data.map((e) => ClosureModel.fromJson(e)).toList();
+      }
+    } catch (_) {}
+    return _mockClosures();
+  }
+
   // --- MOCK FALLBACK DATA ---
   static List<StaffModel> _mockStaff() {
     return [
@@ -325,6 +336,25 @@ class ApiService {
         note: 'Facharzttermin um 16:30 Uhr',
         createdAt: DateTime.now().subtract(const Duration(days: 1)).toIso8601String(),
         staffName: 'Lukas Wagner',
+      ),
+    ];
+  }
+
+  static List<ClosureModel> _mockClosures() {
+    return [
+      ClosureModel(
+        id: 'cls_1',
+        title: 'Konzeptionstag: Kinderschutz & Inklusion',
+        date: '2026-10-23',
+        type: 'KONZEPTIONSTAG',
+        notes: 'Kita für Kinder geschlossen. Ganztägige Teamklausur aller Fachkräfte.',
+      ),
+      ClosureModel(
+        id: 'cls_2',
+        title: 'Brückentag Allerheiligen',
+        date: '2026-10-30',
+        type: 'BRUECKENTAG',
+        notes: 'Einrichtung geschlossen.',
       ),
     ];
   }

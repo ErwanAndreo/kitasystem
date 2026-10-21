@@ -179,7 +179,28 @@ export function initDb() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS kita_closures (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      type TEXT NOT NULL,
+      notes TEXT
+    );
   `);
+
+  // Populate kita closures seed if empty
+  const closureCount = db.prepare('SELECT COUNT(*) as count FROM kita_closures').get() as { count: number };
+  if (closureCount.count === 0) {
+    const insertClosure = db.prepare(`
+      INSERT INTO kita_closures (id, title, date, type, notes)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    insertClosure.run('cls_1', 'Konzeptionstag: Kinderschutz & Inklusion', '2026-10-23', 'KONZEPTIONSTAG', 'Kita für Kinder geschlossen. Ganztägige Teamklausur aller Fachkräfte.');
+    insertClosure.run('cls_2', 'Brückentag Allerheiligen', '2026-10-30', 'BRUECKENTAG', 'Einrichtung geschlossen. Brückentag.');
+    insertClosure.run('cls_3', 'Weihnachtsschließung', '2026-12-24', 'SCHLIESSTAG', 'Heiligabend – Kita geschlossen.');
+    insertClosure.run('cls_4', 'Weihnachtsschließung', '2026-12-31', 'SCHLIESSTAG', 'Silvester – Kita geschlossen.');
+  }
 
   // Populate certifications seed if empty
   const certCount = db.prepare('SELECT COUNT(*) as count FROM staff_certifications').get() as { count: number };

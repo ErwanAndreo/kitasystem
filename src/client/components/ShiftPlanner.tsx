@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shift, Staff, Group, ShiftTemplate, StaffWish } from '../types';
+import { Shift, Staff, Group, ShiftTemplate, StaffWish, KitaClosure } from '../types';
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -19,7 +19,8 @@ import {
   Lightbulb,
   X,
   FileText,
-  CheckCircle2
+  CheckCircle2,
+  Copy
 } from 'lucide-react';
 import { format, addDays, startOfWeek, subWeeks, addWeeks, getISOWeek } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -56,6 +57,9 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   const [printOpen, setPrintOpen] = useState(false);
   const [templates, setTemplates] = useState<ShiftTemplate[]>([]);
   const [wishes, setWishes] = useState<StaffWish[]>([]);
+  const [closures, setClosures] = useState<KitaClosure[]>([]);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const [copyLoading, setCopyLoading] = useState(false);
 
   const [modalData, setModalData] = useState<{
     staff_id: string;
@@ -79,13 +83,52 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   const weekDays = [0, 1, 2, 3, 4].map(offset => addDays(weekStart, offset));
   const weekNumber = getISOWeek(currentDate);
 
-  // Load competitor-proven features: Shift Templates & Staff Wishes
+  // Load competitor-proven features: Shift Templates, Staff Wishes & Kita Closures
   useEffect(() => {
     fetch('/api/shift-templates')
       .then(r => r.json())
       .then(setTemplates)
       .catch(console.error);
+
+    fetch('/api/closures')
+      .then(r => r.json())
+      .then(setClosures)
+      .catch(console.error);
   }, []);
+
+  const handleCopyPreviousWeek = async () => {
+    const mondayStr = format(weekDays[0], 'yyyy-MM-dd');
+    if (!window.confirm(`Dienstplan der Vorwoche in diese Woche (KW ${weekNumber}, ab ${mondayStr}) übernehmen? Bestehende Schichten und Urlaube werden berücksichtigt.`)) {
+      return;
+    }
+    setCopyLoading(true);
+    try {
+      const res = await fetch('/api/shifts/copy-week', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_week_start: mondayStr })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Fehler beim Kopieren der Vorwoche');
+      } else {
+        let msg = `Vorwoche erfolgreich übernommen: ${data.copied_count} Schichten kopiert!`;
+        if (data.skipped_vacation_count > 0) {
+          msg += ` (${data.skipped_vacation_count} Schichten wegen Urlaub ausgespart)`;
+        }
+        if (data.skipped_existing_count > 0) {
+          msg += ` (${data.skipped_existing_count} bereits vorhandene Schichten beibehalten)`;
+        }
+        setCopyStatus(msg);
+        setTimeout(() => setCopyStatus(null), 6000);
+        window.location.reload();
+      }
+    } catch (err: any) {
+      alert('Netzwerkfehler: ' + err.message);
+    } finally {
+      setCopyLoading(false);
+    }
+  };
 
   useEffect(() => {
     const startStr = format(weekDays[0], 'yyyy-MM-dd');
@@ -209,6 +252,17 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
             <span>Druck & Aushang</span>
           </button>
 
+          {/* Copy Previous Week */}
+          <button
+            onClick={handleCopyPreviousWeek}
+            disabled={copyLoading}
+            className="flex items-center space-x-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95 border border-indigo-200"
+            title="Dienstplan der Vorwoche mit 1 Klick in diese Woche übernehmen"
+          >
+            <Copy className="w-3.5 h-3.5 text-indigo-600" />
+            <span>{copyLoading ? 'Kopiere...' : 'Vorwoche übernehmen'}</span>
+          </button>
+
           {/* Add shift */}
           <button
             onClick={() => handleOpenNewShift()}
@@ -220,6 +274,19 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         </div>
       </div>
 
+      {/* Copy week success alert */}
+      {copyStatus && (
+        <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200 text-indigo-900 text-xs rounded-xl flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+            <span className="font-medium">{copyStatus}</span>
+          </div>
+          <button onClick={() => setCopyStatus(null)} className="text-indigo-400 hover:text-indigo-700">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Roster Grid */}
       <div className="mt-4 overflow-x-auto">
         <table className="w-full border-collapse min-w-[850px]">
@@ -229,16 +296,37 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                 Mitarbeiter / Skills
               </th>
               {weekDays.map((day, idx) => {
-                const isToday = format(day, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+                const dayStr = format(day, 'yyyy-MM-dd');
+                const isToday = dayStr === format(new Date(), 'yyyy-MM-dd');
+                const dayClosure = closures.find(c => c.date === dayStr);
+
                 return (
                   <th
                     key={idx}
                     className={`p-3 text-center text-xs font-bold uppercase tracking-wider transition-colors ${
-                      isToday ? 'bg-emerald-50 text-emerald-900 border-b-2 border-emerald-500' : 'bg-slate-50 text-slate-600'
+                      dayClosure
+                        ? dayClosure.type === 'KONZEPTIONSTAG'
+                          ? 'bg-purple-50 text-purple-900 border-b-2 border-purple-400'
+                          : 'bg-rose-50 text-rose-900 border-b-2 border-rose-400'
+                        : isToday
+                          ? 'bg-emerald-50 text-emerald-900 border-b-2 border-emerald-500'
+                          : 'bg-slate-50 text-slate-600'
                     } ${idx === 4 ? 'rounded-r-xl' : ''}`}
                   >
                     <div>{format(day, 'EEEE', { locale: de })}</div>
                     <div className="text-[11px] font-normal text-slate-400">{format(day, 'dd.MM.')}</div>
+                    {dayClosure && (
+                      <div
+                        className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          dayClosure.type === 'KONZEPTIONSTAG'
+                            ? 'bg-purple-200 text-purple-900'
+                            : 'bg-rose-200 text-rose-900'
+                        }`}
+                        title={dayClosure.notes || dayClosure.title}
+                      >
+                        {dayClosure.type === 'KONZEPTIONSTAG' ? '📚 Teamtag' : '🏫 Schließtag'}
+                      </div>
+                    )}
                   </th>
                 );
               })}

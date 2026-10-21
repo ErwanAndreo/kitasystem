@@ -13,6 +13,7 @@ class RosterScreen extends StatefulWidget {
 
 class _RosterScreenState extends State<RosterScreen> {
   List<ShiftModel> _shifts = [];
+  List<ClosureModel> _closures = [];
   bool _loading = true;
   bool _onlyMine = true;
 
@@ -24,10 +25,14 @@ class _RosterScreenState extends State<RosterScreen> {
 
   Future<void> _loadShifts() async {
     setState(() => _loading = true);
-    final list = await ApiService.getShifts(staffId: _onlyMine ? widget.currentUser.id : null);
+    final results = await Future.wait([
+      ApiService.getShifts(staffId: _onlyMine ? widget.currentUser.id : null),
+      ApiService.getClosures(),
+    ]);
     if (mounted) {
       setState(() {
-        _shifts = list;
+        _shifts = results[0] as List<ShiftModel>;
+        _closures = results[1] as List<ClosureModel>;
         _loading = false;
       });
     }
@@ -35,75 +40,103 @@ class _RosterScreenState extends State<RosterScreen> {
 
   void _openShiftWishDialog() {
     final noteController = TextEditingController();
+    String wishType = 'WUNSCH_FRUEH';
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Schichtwunsch für Folgemonat',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(ctx),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Trage hier deine Wünsche für den nächsten Dienstplan ein (z.B. bevorzugte Früh-/Spätdienste oder freie Tage).',
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: noteController,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: 'z.B. Dienstags bitte kein Spätdienst wegen Abendschule...',
-                hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Schichtwunsch einreichen',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Schichtwunsch an Einrichtungsleitung übermittelt!'),
-                      backgroundColor: Color(0xFF16A34A),
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF16A34A),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: const Text('Wunsch einreichen', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              const Text(
+                'Wird direkt der Leitung bei der Dienstplanerstellung als Indikator angezeigt.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
-            ),
-          ],
+              const SizedBox(height: 14),
+
+              DropdownButtonFormField<String>(
+                initialValue: wishType,
+                items: const [
+                  DropdownMenuItem(value: 'WUNSCH_FRUEH', child: Text('🌅 Frühdienst bevorzugt')),
+                  DropdownMenuItem(value: 'WUNSCH_SPAET', child: Text('🌆 Spätdienst bevorzugt')),
+                  DropdownMenuItem(value: 'WUNSCH_FREI', child: Text('🚫 Wunschfrei (Termin/Ruhetag)')),
+                ],
+                onChanged: (val) => setSheetState(() => wishType = val ?? 'WUNSCH_FRUEH'),
+                decoration: InputDecoration(
+                  labelText: 'Art des Wunsches',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: noteController,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  labelText: 'Notiz / Begründung (optional)',
+                  hintText: 'z.B. Dienstags Facharzttermin...',
+                  hintStyle: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    Navigator.pop(ctx);
+                    await ApiService.requestWish(
+                      staffId: widget.currentUser.id,
+                      date: DateTime.now().add(const Duration(days: 2)).toIso8601String().split('T')[0],
+                      type: wishType,
+                      note: noteController.text,
+                    );
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('Schichtwunsch an Einrichtungsleitung übermittelt!'),
+                        backgroundColor: Color(0xFF16A34A),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF16A34A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Wunsch verbindlich senden', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -172,9 +205,58 @@ class _RosterScreenState extends State<RosterScreen> {
                   ? const Center(child: Text('Keine Schichten gefunden.'))
                   : ListView.builder(
                       padding: const EdgeInsets.all(16),
-                      itemCount: _shifts.length,
+                      itemCount: _shifts.length + (_closures.isNotEmpty ? 1 : 0),
                       itemBuilder: (ctx, idx) {
-                        final sh = _shifts[idx];
+                        if (_closures.isNotEmpty && idx == 0) {
+                          final c = _closures.first;
+                          final isKonz = c.type == 'KONZEPTIONSTAG';
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isKonz ? const Color(0xFFFAF5FF) : const Color(0xFFFFF1F2),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isKonz ? const Color(0xFFE9D5FF) : const Color(0xFFFECDD3),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isKonz ? Icons.school_outlined : Icons.door_front_door_outlined,
+                                  color: isKonz ? const Color(0xFF7E22CE) : const Color(0xFFE11D48),
+                                  size: 22,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '${c.title} (${c.date})',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: isKonz ? const Color(0xFF581C87) : const Color(0xFF9F1239),
+                                        ),
+                                      ),
+                                      if (c.notes != null)
+                                        Text(
+                                          c.notes!,
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isKonz ? const Color(0xFF7E22CE) : const Color(0xFFBE123C),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        final sh = _shifts[_closures.isNotEmpty ? idx - 1 : idx];
                         final isCancelled = sh.status == 'CANCELLED';
 
                         return Container(

@@ -307,3 +307,29 @@ class StaffWishModel {
     );
   }
 }
+
+class ClosureModel {
+  final String id;
+  final String title;
+  final String date;
+  final String type;
+  final String? notes;
+
+  ClosureModel({
+    required this.id,
+    required this.title,
+    required this.date,
+    required this.type,
+    this.notes,
+  });
+
+  factory ClosureModel.fromJson(Map<String, dynamic> json) {
+    return ClosureModel(
+      id: json['id'] ?? '',
+      title: json['title'] ?? '',
+      date: json['date'] ?? '',
+      type: json['type'] ?? 'SCHLIESSTAG',
+      notes: json['notes'],
+    );
+  }
+}

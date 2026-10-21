@@ -373,6 +373,55 @@ async function testAll() {
     assert(html.includes('KitaPlaner'));
   });
 
+  // 17. Kita Closures (Schließtage & Konzeptionstage)
+  let testClosureId = null;
+  await check('GET /api/closures returns upcoming closures & Konzeptionstage', async () => {
+    const res = await fetch(`${BASE_URL}/api/closures`);
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert(Array.isArray(json) && json.length >= 1);
+  });
+
+  await check('POST /api/closures creates a new closure day', async () => {
+    const res = await fetch(`${BASE_URL}/api/closures`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Team-Fortbildungstag DGUV',
+        date: '2026-11-20',
+        type: 'KONZEPTIONSTAG',
+        notes: 'In-House Erste Hilfe Auffrischung'
+      })
+    });
+    assert.strictEqual(res.status, 201);
+    const json = await res.json();
+    testClosureId = json.id;
+    assert(testClosureId);
+  });
+
+  await check('DELETE /api/closures deletes closure', async () => {
+    if (testClosureId) {
+      const res = await fetch(`${BASE_URL}/api/closures/${testClosureId}`, { method: 'DELETE' });
+      assert.strictEqual(res.status, 200);
+    }
+  });
+
+  // 18. Copy Week (Wochendienstplan duplizieren)
+  await check('POST /api/shifts/copy-week duplicates previous week roster with vacation check', async () => {
+    const res = await fetch(`${BASE_URL}/api/shifts/copy-week`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_week_start: '2026-10-26'
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const json = await res.json();
+    assert.strictEqual(json.success, true);
+    assert(typeof json.copied_count === 'number');
+    assert(typeof json.skipped_vacation_count === 'number');
+  });
+
   console.log(`\n========================================`);
   console.log(`🎯 Test Summary: ${passed} Passed, ${failed} Failed`);
   console.log(`========================================\n`);

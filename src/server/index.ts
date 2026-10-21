@@ -850,6 +850,132 @@ app.get('/api/shifts', (req, res) => {
   }
 });
 
+app.post('/api/shifts/copy-week', (req, res) => {
+  try {
+    const { target_week_start } = req.body;
+    if (!target_week_start) {
+      return res.status(400).json({ error: 'target_week_start ist erforderlich (JJJJ-MM-TT)' });
+    }
+
+    const targetDate = new Date(target_week_start);
+    const sourceDate = new Date(targetDate);
+    sourceDate.setDate(sourceDate.getDate() - 7);
+
+    const pad = (n: number) => (n < 10 ? '0' + n : '' + n);
+    const formatDt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const sourceStart = formatDt(sourceDate);
+    const sourceEndDate = new Date(sourceDate);
+    sourceEndDate.setDate(sourceEndDate.getDate() + 4);
+    const sourceEnd = formatDt(sourceEndDate);
+
+    const sourceShifts = db.prepare(`
+      SELECT * FROM shifts WHERE date >= ? AND date <= ? AND status = 'CONFIRMED'
+    `).all(sourceStart, sourceEnd) as any[];
+
+    if (sourceShifts.length === 0) {
+      return res.status(400).json({ error: `In der Vorwoche (${sourceStart} bis ${sourceEnd}) wurden keine Schichten gefunden.` });
+    }
+
+    let copied = 0;
+    let skippedVacation = 0;
+    let skippedExisting = 0;
+
+    const insertStmt = db.prepare(`
+      INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status, role_override)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const logStmt = db.prepare(`
+      INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `);
+
+    db.transaction(() => {
+      for (const s of sourceShifts) {
+        const origD = new Date(s.date);
+        origD.setDate(origD.getDate() + 7);
+        const newDateStr = formatDt(origD);
+
+        const vac = db.prepare(`
+          SELECT * FROM absences
+          WHERE staff_id = ? AND start_date <= ? AND end_date >= ?
+        `).get(s.staff_id, newDateStr, newDateStr);
+
+        if (vac) {
+          skippedVacation++;
+          continue;
+        }
+
+        const existing = db.prepare(`
+          SELECT id FROM shifts WHERE staff_id = ? AND date = ?
+        `).get(s.staff_id, newDateStr);
+
+        if (existing) {
+          skippedExisting++;
+          continue;
+        }
+
+        const newId = 'sh_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+        insertStmt.run(newId, s.staff_id, s.group_id, newDateStr, s.start_time, s.end_time, s.break_minutes, 'CONFIRMED', s.role_override);
+        copied++;
+
+        logStmt.run(
+          'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+          s.staff_id,
+          'SHIFT_ASSIGNED',
+          'Schichtplan aus Vorwoche übernommen',
+          `Schicht für ${newDateStr} (${s.start_time} - ${s.end_time} Uhr) automatisch aus Vorwoche übernommen.`,
+          'Sabine Weber (Leitung)',
+          new Date().toISOString()
+        );
+      }
+    })();
+
+    res.json({
+      success: true,
+      copied_count: copied,
+      skipped_vacation_count: skippedVacation,
+      skipped_existing_count: skippedExisting,
+      total_source_shifts: sourceShifts.length
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/closures', (req, res) => {
+  try {
+    const closures = db.prepare('SELECT * FROM kita_closures ORDER BY date ASC').all();
+    res.json(closures);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/closures', (req, res) => {
+  try {
+    const { title, date, type, notes } = req.body;
+    const id = 'cls_' + Date.now();
+    db.prepare(`
+      INSERT INTO kita_closures (id, title, date, type, notes)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, title, date, type || 'SCHLIESSTAG', notes || null);
+    res.status(201).json({ id, title, date, type, notes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/closures/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM kita_closures WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/shifts', (req, res) => {
   try {
     const { staff_id, group_id, date, start_time, end_time, break_minutes, role_override } = req.body;

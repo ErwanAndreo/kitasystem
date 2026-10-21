@@ -193,3 +193,11 @@ export interface DirectorNote {
   created_at: string;
   updated_at: string;
 }
+
+export interface KitaClosure {
+  id: string;
+  title: string;
+  date: string;
+  type: 'KONZEPTIONSTAG' | 'SCHLIESSTAG' | 'BRUECKENTAG' | 'FERIEN';
+  notes?: string | null;
+}
