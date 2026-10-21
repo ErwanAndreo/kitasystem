@@ -1,0 +1,6 @@
+node_modules/
+dist/
+kita.sqlite*
+kita_mobile/build/
+kita_mobile/.dart_tool/
+.DS_Store
