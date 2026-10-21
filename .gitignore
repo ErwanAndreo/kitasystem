@@ -1,6 +1,8 @@
 node_modules/
 dist/
 kita.sqlite*
+backups/
+logs/
 kita_mobile/build/
 kita_mobile/.dart_tool/
 .DS_Store
