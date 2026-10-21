@@ -155,7 +155,105 @@ export function initDb() {
       created_at TEXT NOT NULL,
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS staff_certifications (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      issue_date TEXT,
+      expires_at TEXT NOT NULL,
+      institution TEXT,
+      notes TEXT,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS director_notes (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL DEFAULT 'ALLGEMEIN',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#fef08a',
+      is_pinned INTEGER NOT NULL DEFAULT 0,
+      checklist TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+
+  // Populate certifications seed if empty
+  const certCount = db.prepare('SELECT COUNT(*) as count FROM staff_certifications').get() as { count: number };
+  if (certCount.count === 0) {
+    const insertCert = db.prepare(`
+      INSERT INTO staff_certifications (id, staff_id, type, title, issue_date, expires_at, institution, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    // Sabine Weber
+    insertCert.run('c_1', 's_sabine', 'ERSTE_HILFE_KIND', 'Erste-Hilfe am Kind (DGUV)', '2025-04-15', '2027-04-15', 'DRK Kreisverband', 'Zertifikat gültig');
+    insertCert.run('c_2', 's_sabine', 'KINDERSCHUTZ_8A', 'Kinderschutzfachkraft § 8a SGB VIII', '2024-09-01', '2028-09-01', 'Paritätisches Bildungswerk', 'Vertiefungsmodul absolviert');
+    // Julia Fischer (Springer)
+    insertCert.run('c_3', 's_julia', 'ERSTE_HILFE_KIND', 'Erste-Hilfe am Kind (DGUV)', '2025-02-10', '2027-02-10', 'Malteser Hilfsdienst', 'Vollzertifikat');
+    insertCert.run('c_4', 's_julia', 'U3_QUALIFIKATION', 'U3-Zertifikatskurs (160 Std.)', '2023-01-10', '2029-01-10', 'LVR Landesjugendamt', 'Anerkannte Zusatzqualifikation');
+    // Markus Becker (Erste Hilfe läuft in 15 Tagen ab!)
+    insertCert.run('c_5', 's_markus', 'ERSTE_HILFE_KIND', 'Erste-Hilfe am Kind (DGUV)', '2024-11-05', '2026-11-05', 'Johanniter-Unfall-Hilfe', 'Auffrischung dringend buchen!');
+    // Lukas Wagner (Erste Hilfe ist seit 3 Wochen abgelaufen!)
+    insertCert.run('c_6', 's_lukas', 'ERSTE_HILFE_KIND', 'Erste-Hilfe am Kind (DGUV)', '2024-09-30', '2026-09-30', 'DRK', 'Abgelaufen! Nachschulung erforderlich.');
+    // Elena Rossi (Erweitertes Führungszeugnis erneuern)
+    insertCert.run('c_7', 's_elena', 'FUEHRUNGSZEUGNIS_72A', 'Erweitertes Führungszeugnis § 72a SGB VIII', '2021-12-15', '2026-12-15', 'Bundesamt für Justiz', 'Regelprüfung nach 5 Jahren');
+    insertCert.run('c_8', 's_elena', 'ERSTE_HILFE_KIND', 'Erste-Hilfe am Kind (DGUV)', '2025-06-20', '2027-06-20', 'ASB', 'Gültig');
+    // Lisa Hoffmann
+    insertCert.run('c_9', 's_lisa', 'ERSTE_HILFE_KIND', 'Erste-Hilfe am Kind (DGUV)', '2025-08-10', '2027-08-10', 'DRK', 'Gültig');
+  }
+
+  // Populate OneNote-style director notes seed if empty
+  const notesCount = db.prepare('SELECT COUNT(*) as count FROM director_notes').get() as { count: number };
+  if (notesCount.count === 0) {
+    const insertNote = db.prepare(`
+      INSERT INTO director_notes (id, category, title, content, color, is_pinned, checklist, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+    insertNote.run(
+      'n_1', 'TEAM', 'Team-Besprechung & Personalplanung November',
+      'Besprechungspunkte für die kommende Teamsitzung:\n- Urlaubsanträge für die Weihnachtsferien abstimmen (Notgruppe mit mind. 1 Fachkraft planen)\n- Auffrischungskurs Erste Hilfe am Kind für Markus und Lukas organisieren (DRK Angebot liegt vor)\n- Hospitation der neuen Praktikantin Leonie in der Krippe',
+      '#fef08a', 1,
+      JSON.stringify([
+        { id: 'c1', text: 'DRK Schulungstermin am 12.11. bestätigen', done: false },
+        { id: 'c2', text: 'Aushang für Schließzeiten Weihnachten erstellen', done: true },
+        { id: 'c3', text: 'Gruppenwechsel Markus ➔ Krabbelmäuse prüfen', done: false }
+      ]),
+      now, now
+    );
+    insertNote.run(
+      'n_2', 'ELTERN', 'Elternbeirat & Martinsumzug 2026',
+      'Rücksprache mit Frau Müller (Elternbeiratsvorsitzende):\n- Laternenfest am 11.11. ab 17:00 Uhr im Garten\n- Freiwillige Feuerwehr für Streckensicherung angefragt\n- Weckmänner-Bestellung bei Bäckerei Schmidt (120 Stück)',
+      '#bfdbfe', 0,
+      JSON.stringify([
+        { id: 'c4', text: 'Feuerwehr Bestätigung abwarten', done: true },
+        { id: 'c5', text: 'Elternbrief mit Abholzeiten aushängen', done: false }
+      ]),
+      now, now
+    );
+    insertNote.run(
+      'n_3', 'TRAEGER', 'Träger-Gespräch & Budgetplanung 2027',
+      'Vorbereitung für Träger-Termin am 28.10.:\n- Beantragung Erhöhung Springer-Stunden auf 39h Vollzeit\n- Anschaffung Spielpodest für Krabbelmäuse U3\n- Sachkosten-Abrechnung für Fortbildungen einreichen',
+      '#bbf7d0', 0,
+      JSON.stringify([
+        { id: 'c6', text: 'Kostenvoranschlag Podest beifügen', done: false },
+        { id: 'c7', text: 'Überstunden-Statistik für Träger ausdrucken', done: true }
+      ]),
+      now, now
+    );
+    insertNote.run(
+      'n_4', 'KONZEPTE', 'Kinderschutzkonzept & Notfallplan 2026/27',
+      'Überarbeitung des Gewaltschutzkonzepts nach § 8a SGB VIII:\n- Notfallnummern im Leitungsbüro aktualisiert\n- Vertrauenserzieherin: Anna Schmidt & Sabine Weber\n- Dokumentationsbögen für Verdachtsfälle in Ordner B3',
+      '#e9d5ff', 0,
+      JSON.stringify([
+        { id: 'c8', text: 'Dokumentenmappe im Leitungsbüro deponieren', done: true }
+      ]),
+      now, now
+    );
+  }
 
   // Populate standard Kita shift templates
   const insertTemplate = db.prepare(`

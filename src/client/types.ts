@@ -19,6 +19,7 @@ export interface Staff {
   skills?: string[];
   secondary_roles?: string[];
   can_spring?: number;
+  certifications?: Certification[];
   clock_status?: 'CLOCKED_IN' | 'IN_BREAK' | 'COMPLETED' | null;
   current_absence?: 'SICK' | 'VACATION' | 'TRAINING' | null;
   unread_notifications_count?: number;
@@ -157,4 +158,38 @@ export interface TimeOverviewItem {
   adjustments_hours: number;
   overtime_hours: number;
   remaining_vacation: number;
+}
+
+export interface Certification {
+  id: string;
+  staff_id: string;
+  type: string;
+  title: string;
+  issue_date?: string | null;
+  expires_at: string;
+  institution?: string;
+  notes?: string;
+  days_until_expiry?: number;
+  is_expired?: boolean;
+  expires_soon?: boolean;
+  staff_name?: string;
+  staff_role?: Role;
+}
+
+export interface DirectorChecklistItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+export interface DirectorNote {
+  id: string;
+  category: 'TEAM' | 'ELTERN' | 'TRAEGER' | 'KONZEPTE' | 'ALLGEMEIN';
+  title: string;
+  content: string;
+  color: string;
+  is_pinned: number;
+  checklist: DirectorChecklistItem[];
+  created_at: string;
+  updated_at: string;
 }

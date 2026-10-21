@@ -93,13 +93,197 @@ app.get('/api/staff', (req, res) => {
       FROM staff s
       WHERE s.is_active = 1
       ORDER BY s.role = 'LEITUNG' DESC, s.name ASC
-    `).all(today, today).map((s: any) => ({
-      ...s,
-      skills: JSON.parse(s.skills || '[]'),
-      secondary_roles: JSON.parse(s.secondary_roles || '[]')
-    }));
+    `).all(today, today).map((s: any) => {
+      const certs = db.prepare('SELECT * FROM staff_certifications WHERE staff_id = ? ORDER BY expires_at ASC').all(s.id).map((c: any) => {
+        const expDate = new Date(c.expires_at);
+        const nowDate = new Date(today);
+        const diffDays = Math.ceil((expDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24));
+        return {
+          ...c,
+          days_until_expiry: diffDays,
+          is_expired: diffDays < 0,
+          expires_soon: diffDays >= 0 && diffDays <= 60
+        };
+      });
+
+      return {
+        ...s,
+        skills: JSON.parse(s.skills || '[]'),
+        secondary_roles: JSON.parse(s.secondary_roles || '[]'),
+        certifications: certs
+      };
+    });
 
     res.json(staffList);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1.1 QUALIFICATIONS & CERTIFICATIONS EXPIRY TRACKING
+app.get('/api/certifications', (req, res) => {
+  try {
+    const { staff_id } = req.query;
+    let query = `
+      SELECT c.*, s.name as staff_name, s.role as staff_role
+      FROM staff_certifications c
+      JOIN staff s ON c.staff_id = s.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (staff_id) {
+      query += ` AND c.staff_id = ?`;
+      params.push(staff_id);
+    }
+    query += ` ORDER BY c.expires_at ASC`;
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const certs = db.prepare(query).all(...params).map((c: any) => {
+      const expDate = new Date(c.expires_at);
+      const nowDate = new Date(today);
+      const diffDays = Math.ceil((expDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        ...c,
+        days_until_expiry: diffDays,
+        is_expired: diffDays < 0,
+        expires_soon: diffDays >= 0 && diffDays <= 60
+      };
+    });
+    res.json(certs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/certifications/alerts', (req, res) => {
+  try {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const certs = db.prepare(`
+      SELECT c.*, s.name as staff_name, s.role as staff_role
+      FROM staff_certifications c
+      JOIN staff s ON c.staff_id = s.id
+      WHERE c.expires_at <= date(?, '+60 days')
+      ORDER BY c.expires_at ASC
+    `).all(today).map((c: any) => {
+      const expDate = new Date(c.expires_at);
+      const nowDate = new Date(today);
+      const diffDays = Math.ceil((expDate.getTime() - nowDate.getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        ...c,
+        days_until_expiry: diffDays,
+        is_expired: diffDays < 0,
+        expires_soon: diffDays >= 0 && diffDays <= 60
+      };
+    });
+    res.json(certs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/certifications', (req, res) => {
+  try {
+    const { staff_id, type, title, issue_date, expires_at, institution, notes } = req.body;
+    const id = 'cert_' + Date.now();
+    db.prepare(`
+      INSERT INTO staff_certifications (id, staff_id, type, title, issue_date, expires_at, institution, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, staff_id, type, title, issue_date || null, expires_at, institution || '', notes || '');
+    res.status(201).json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/certifications/:id', (req, res) => {
+  try {
+    const { type, title, issue_date, expires_at, institution, notes } = req.body;
+    db.prepare(`
+      UPDATE staff_certifications SET 
+        type = ?, title = ?, issue_date = ?, expires_at = ?, institution = ?, notes = ?
+      WHERE id = ?
+    `).run(type, title, issue_date || null, expires_at, institution || '', notes || '', req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/certifications/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM staff_certifications WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1.2 ONENOTE-STYLE DIRECTOR NOTEBOOK
+app.get('/api/director-notes', (req, res) => {
+  try {
+    const { category, search } = req.query;
+    let query = `SELECT * FROM director_notes WHERE 1=1`;
+    const params: any[] = [];
+    if (category && category !== 'ALL') {
+      query += ` AND category = ?`;
+      params.push(category);
+    }
+    if (search) {
+      query += ` AND (title LIKE ? OR content LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`);
+    }
+    query += ` ORDER BY is_pinned DESC, updated_at DESC`;
+    const notes = db.prepare(query).all(...params).map((n: any) => ({
+      ...n,
+      checklist: JSON.parse(n.checklist || '[]')
+    }));
+    res.json(notes);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/director-notes', (req, res) => {
+  try {
+    const { category, title, content, color, is_pinned, checklist } = req.body;
+    const id = 'note_' + Date.now();
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO director_notes (id, category, title, content, color, is_pinned, checklist, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, category || 'ALLGEMEIN', title || 'Neue Notiz', content || '',
+      color || '#fef08a', is_pinned ? 1 : 0, JSON.stringify(checklist || []),
+      now, now
+    );
+    res.status(201).json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/director-notes/:id', (req, res) => {
+  try {
+    const { category, title, content, color, is_pinned, checklist } = req.body;
+    const now = new Date().toISOString();
+    db.prepare(`
+      UPDATE director_notes SET
+        category = ?, title = ?, content = ?, color = ?, is_pinned = ?, checklist = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      category || 'ALLGEMEIN', title, content || '',
+      color || '#fef08a', is_pinned ? 1 : 0, JSON.stringify(checklist || []),
+      now, req.params.id
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/director-notes/:id', (req, res) => {
+  try {
+    db.prepare('DELETE FROM director_notes WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

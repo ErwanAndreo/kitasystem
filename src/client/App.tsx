@@ -6,6 +6,7 @@ import { ApprovalCenter } from './components/ApprovalCenter';
 import { ShiftPlanner } from './components/ShiftPlanner';
 import { OvertimeTracker } from './components/OvertimeTracker';
 import { StaffManagement } from './components/StaffManagement';
+import { DirectorNotebook } from './components/DirectorNotebook';
 import { MobileAppView } from './components/MobileAppView';
 import { KioskView } from './components/KioskView';
 import { EmergencyModal } from './components/EmergencyModal';
@@ -18,12 +19,13 @@ import {
   Clock, 
   Users, 
   ShieldCheck, 
-  Sparkles 
+  Sparkles,
+  BookOpen
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'LEITUNG' | 'MOBILE' | 'KIOSK'>('LEITUNG');
-  const [leitungTab, setLeitungTab] = useState<'DASHBOARD' | 'ROSTER' | 'OVERTIME' | 'STAFF'>('DASHBOARD');
+  const [leitungTab, setLeitungTab] = useState<'DASHBOARD' | 'ROSTER' | 'OVERTIME' | 'STAFF' | 'NOTEBOOK'>('DASHBOARD');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
 
   const [staffList, setStaffList] = useState<Staff[]>([]);
@@ -192,6 +194,7 @@ export const App: React.FC = () => {
 
   const pendingApprovalsCount = approvals.filter(a => a.status === 'PENDING').length;
   const criticalRatioAlert = ratioStatus.some(g => g.status === 'CRITICAL');
+  const criticalCertsCount = staffList.flatMap(s => s.certifications || []).filter(c => c.is_expired || c.expires_soon).length;
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
@@ -276,7 +279,24 @@ export const App: React.FC = () => {
                     }`}
                   >
                     <Users className="w-4 h-4" />
-                    <span>Personal- & Accounts</span>
+                    <span>Personal & Qualifikationen</span>
+                    {criticalCertsCount > 0 && (
+                      <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-rose-500 text-white font-black" title={`${criticalCertsCount} Zertifikate fällig oder abgelaufen`}>
+                        {criticalCertsCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setLeitungTab('NOTEBOOK')}
+                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      leitungTab === 'NOTEBOOK'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    <span>Leitungs-Notizbuch</span>
                   </button>
                 </div>
 
@@ -325,6 +345,11 @@ export const App: React.FC = () => {
                     onUpdateStaff={handleUpdateStaff}
                     onRefresh={loadAllData}
                   />
+                )}
+
+                {/* Sub-view 5: LEITUNGS-NOTIZBUCH (ONENOTE STYLE) */}
+                {leitungTab === 'NOTEBOOK' && (
+                  <DirectorNotebook />
                 )}
               </div>
             )}
