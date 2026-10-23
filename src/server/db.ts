@@ -28,7 +28,12 @@ export function initDb() {
       is_active INTEGER NOT NULL DEFAULT 1,
       skills TEXT NOT NULL DEFAULT '[]',
       secondary_roles TEXT NOT NULL DEFAULT '[]',
-      can_spring INTEGER NOT NULL DEFAULT 0
+      can_spring INTEGER NOT NULL DEFAULT 0,
+      username TEXT NOT NULL DEFAULT 'admin',
+      password TEXT NOT NULL DEFAULT 'admin',
+      password_changed INTEGER NOT NULL DEFAULT 0,
+      share_favorites TEXT NOT NULL DEFAULT '[]',
+      critical_alerts_mode TEXT NOT NULL DEFAULT 'CRITICAL'
     );
 
     CREATE TABLE IF NOT EXISTS groups (
@@ -61,6 +66,7 @@ export function initDb() {
       break_minutes INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'CONFIRMED',
       role_override TEXT,
+      warning TEXT,
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
     );
@@ -187,7 +193,344 @@ export function initDb() {
       type TEXT NOT NULL,
       notes TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS policy_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      target_ratio REAL NOT NULL,
+      min_fachkraft_percent REAL NOT NULL,
+      description TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_queue (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      change_type TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      scheduled_for TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      sent_at TEXT,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS autopilot_proposals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      situation TEXT NOT NULL,
+      action_type TEXT NOT NULL,
+      target_group_id TEXT NOT NULL,
+      target_staff_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      break_minutes INTEGER NOT NULL DEFAULT 30,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      confidence_score REAL NOT NULL DEFAULT 1.0,
+      matched_reason TEXT,
+      created_at TEXT NOT NULL,
+      decided_at TEXT,
+      FOREIGN KEY (target_group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (target_staff_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS checklists (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'ROUTINE',
+      created_by_id TEXT NOT NULL,
+      created_by_name TEXT NOT NULL,
+      is_shared INTEGER NOT NULL DEFAULT 0,
+      share_scope TEXT NOT NULL DEFAULT 'ALL',
+      shared_group_id TEXT,
+      shared_group_name TEXT,
+      shared_staff_ids TEXT DEFAULT '[]',
+      shared_staff_names TEXT DEFAULT '[]',
+      color TEXT NOT NULL DEFAULT '#3b82f6',
+      items TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (created_by_id) REFERENCES staff(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS substitute_cycles (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      absent_staff_id TEXT,
+      reason TEXT,
+      candidates TEXT NOT NULL DEFAULT '[]',
+      current_candidate_index INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+      accepted_staff_id TEXT,
+      director_decision_staff_id TEXT,
+      director_note TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS children (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      birth_date TEXT NOT NULL,
+      gender TEXT,
+      photo_url TEXT,
+      care_hours INTEGER NOT NULL DEFAULT 35,
+      contract_start TEXT NOT NULL,
+      contract_end TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS emergency_contacts (
+      id TEXT PRIMARY KEY,
+      child_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      relationship TEXT NOT NULL,
+      phone_primary TEXT NOT NULL,
+      phone_secondary TEXT,
+      priority INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS pickup_authorizations (
+      id TEXT PRIMARY KEY,
+      child_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      relationship TEXT NOT NULL,
+      phone TEXT,
+      id_card_number TEXT,
+      photo_url TEXT,
+      is_forbidden INTEGER NOT NULL DEFAULT 0,
+      notes TEXT,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS child_health_records (
+      child_id TEXT PRIMARY KEY,
+      allergies TEXT NOT NULL DEFAULT '[]',
+      dietary_needs TEXT,
+      medication_plan TEXT,
+      emergency_instructions TEXT,
+      measles_vaccinated INTEGER NOT NULL DEFAULT 1,
+      doctor_name TEXT,
+      doctor_phone TEXT,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS child_attendance (
+      id TEXT PRIMARY KEY,
+      child_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'present',
+      check_in_time TEXT,
+      check_out_time TEXT,
+      picked_up_by TEXT,
+      absence_reason TEXT,
+      meal_ordered INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      UNIQUE(child_id, date)
+    );
+
+    CREATE TABLE IF NOT EXISTS child_daily_logs (
+      id TEXT PRIMARY KEY,
+      child_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      log_type TEXT NOT NULL,
+      time_start TEXT NOT NULL,
+      time_end TEXT,
+      details TEXT NOT NULL,
+      staff_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS parent_accounts (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      phone TEXT,
+      preferred_language TEXT NOT NULL DEFAULT 'de',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS parent_child_links (
+      parent_id TEXT NOT NULL,
+      child_id TEXT NOT NULL,
+      is_primary_contact INTEGER NOT NULL DEFAULT 1,
+      photo_consent INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (parent_id, child_id),
+      FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS ratio_settings (
+      id TEXT PRIMARY KEY,
+      group_id TEXT,
+      target_ratio REAL NOT NULL,
+      warning_threshold_percent REAL NOT NULL DEFAULT 15.0,
+      critical_threshold_percent REAL NOT NULL DEFAULT 25.0,
+      two_person_rule INTEGER NOT NULL DEFAULT 1,
+      core_time_start TEXT NOT NULL DEFAULT '09:00',
+      core_time_end TEXT NOT NULL DEFAULT '13:00',
+      min_qualification_quote REAL NOT NULL DEFAULT 0.50,
+      bundesland_preset TEXT NOT NULL DEFAULT 'NRW_KIBIZ',
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    -- LAGE.app Parity: Elterndienste, Arbeitseinsätze & Pflichtstunden
+    CREATE TABLE IF NOT EXISTS parent_duties (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      category TEXT NOT NULL, -- 'GARTEN', 'RENOVIERUNG', 'NOTFALL_KOCHEN', 'FEST', 'WAESCHE', 'SONSTIGES'
+      hours_credit REAL NOT NULL DEFAULT 2.0,
+      max_helpers INTEGER NOT NULL DEFAULT 4,
+      date TEXT NOT NULL,
+      time_start TEXT,
+      time_end TEXT,
+      location TEXT,
+      status TEXT NOT NULL DEFAULT 'OPEN', -- 'OPEN', 'FILLED', 'COMPLETED'
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS parent_duty_signups (
+      id TEXT PRIMARY KEY,
+      duty_id TEXT NOT NULL,
+      parent_id TEXT NOT NULL,
+      hours_credited REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'REGISTERED', -- 'REGISTERED', 'CONFIRMED', 'CANCELLED'
+      confirmed_by TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (duty_id) REFERENCES parent_duties(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE
+    );
+
+    -- LAGE.app Parity: Blitz-Umfragen & Abstimmungen
+    CREATE TABLE IF NOT EXISTS parent_polls (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      question TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'ALLGEMEIN',
+      created_by_id TEXT NOT NULL,
+      created_by_name TEXT NOT NULL,
+      expires_at TEXT,
+      is_closed INTEGER NOT NULL DEFAULT 0,
+      allow_multiple INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS parent_poll_options (
+      id TEXT PRIMARY KEY,
+      poll_id TEXT NOT NULL,
+      option_text TEXT NOT NULL,
+      vote_count INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (poll_id) REFERENCES parent_polls(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS parent_poll_votes (
+      id TEXT PRIMARY KEY,
+      poll_id TEXT NOT NULL,
+      option_id TEXT NOT NULL,
+      parent_id TEXT NOT NULL,
+      voted_at TEXT NOT NULL,
+      FOREIGN KEY (poll_id) REFERENCES parent_polls(id) ON DELETE CASCADE,
+      FOREIGN KEY (option_id) REFERENCES parent_poll_options(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE,
+      UNIQUE(poll_id, parent_id, option_id)
+    );
+
+    -- LAGE.app Parity: Digitale Verträge & Signaturen
+    CREATE TABLE IF NOT EXISTS digital_documents (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      document_type TEXT NOT NULL, -- 'BETREUUNGSVERTRAG', 'NOTFALLVOLLMACHT', 'FOTOERLAUBNIS', 'MEDIKAMENTENPLAN'
+      child_id TEXT,
+      parent_id TEXT NOT NULL,
+      content_html TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING_SIGNATURE', -- 'PENDING_SIGNATURE', 'SIGNED'
+      signature_data TEXT,
+      signed_at TEXT,
+      signed_by_name TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+      FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE
+    );
+
+    -- Dedizierte Kiosk- & Tablet-Geräte-Accounts (Nicht an Einzelpersonen gebunden!)
+    CREATE TABLE IF NOT EXISTS kiosk_devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      group_id TEXT,
+      pin TEXT NOT NULL DEFAULT '1234',
+      device_token TEXT NOT NULL,
+      last_active TEXT,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE SET NULL
+    );
   `);
+
+  try {
+    db.exec("ALTER TABLE parent_accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'ELTERN';");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE parent_accounts ADD COLUMN board_position TEXT DEFAULT NULL;");
+  } catch (_) {}
+  try {
+    db.exec("ALTER TABLE parent_accounts ADD COLUMN mandatory_hours REAL NOT NULL DEFAULT 20.0;");
+  } catch (_) {}
+
+  try {
+    db.exec("ALTER TABLE shifts ADD COLUMN warning TEXT;");
+  } catch (e) {
+    // Column already exists
+  }
+
+  try {
+    db.exec("ALTER TABLE staff ADD COLUMN critical_alerts_mode TEXT NOT NULL DEFAULT 'CRITICAL';");
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Populate settings seed if empty
+  const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
+  insertSetting.run('autopilot_enabled', 'true');
+  insertSetting.run('notification_delay_minutes', '30');
+  insertSetting.run('default_shift_duration_hours', '8.0');
+  insertSetting.run('default_shift_start_time', '08:00');
+  insertSetting.run('default_shift_break_minutes', '30');
+
+  // Populate policy templates seed if empty
+  const policyCount = db.prepare('SELECT COUNT(*) as count FROM policy_templates').get() as { count: number };
+  if (policyCount.count === 0) {
+    const insertPol = db.prepare(`
+      INSERT INTO policy_templates (id, name, type, target_ratio, min_fachkraft_percent, description)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertPol.run('pol_u3', 'Krippe / U3 (KiBiz Standard)', 'U3', 3.33, 0.67, '1 Betreuer auf 3.3 Kinder, mind. 67% Fachkräfte');
+    insertPol.run('pol_ue3', 'Kindergarten / Ü3 (Elementar)', 'UE3', 8.33, 0.50, '1 Betreuer auf 8.3 Kinder, mind. 50% Fachkräfte');
+    insertPol.run('pol_mixed', 'Altersgemischt (Hort / U3+Ü3)', 'MIXED', 6.0, 0.60, '1 Betreuer auf 6.0 Kinder, 60% Fachkraftquote');
+    insertPol.run('pol_custom', 'Individuell / Eigener Schlüssel', 'CUSTOM', 5.0, 0.50, 'Frei wählbarer Schlüssel je nach Trägervorgabe');
+  }
 
   // Populate kita closures seed if empty
   const closureCount = db.prepare('SELECT COUNT(*) as count FROM kita_closures').get() as { count: number };
@@ -303,11 +646,428 @@ export function initDb() {
   try { db.prepare("ALTER TABLE staff ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE staff ADD COLUMN secondary_roles TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE staff ADD COLUMN can_spring INTEGER NOT NULL DEFAULT 0").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN standard_work_hours TEXT DEFAULT '08:00 - 16:30'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN availability_window TEXT DEFAULT 'Mo-Fr 07:30 - 17:00'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN username TEXT NOT NULL DEFAULT 'admin'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN password TEXT NOT NULL DEFAULT 'admin'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN password_changed INTEGER NOT NULL DEFAULT 0").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN share_favorites TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
+  try { db.prepare("UPDATE staff SET username = 'admin' WHERE username IS NULL OR username = ''").run(); } catch (_) {}
+  try { db.prepare("UPDATE staff SET password = 'admin' WHERE password IS NULL OR password = ''").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE groups ADD COLUMN required_skills TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE groups ADD COLUMN policy_id TEXT DEFAULT 'pol_ue3'").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE shifts ADD COLUMN role_override TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE checklists ADD COLUMN share_scope TEXT NOT NULL DEFAULT 'ALL'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE checklists ADD COLUMN shared_group_id TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE checklists ADD COLUMN shared_group_name TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE checklists ADD COLUMN shared_staff_ids TEXT DEFAULT '[]'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE checklists ADD COLUMN shared_staff_names TEXT DEFAULT '[]'").run(); } catch (_) {}
+  try { db.prepare("UPDATE checklists SET share_scope = 'ALL' WHERE is_shared = 1 AND (share_scope IS NULL OR share_scope = '')").run(); } catch (_) {}
+  try { db.prepare("UPDATE checklists SET share_scope = 'PRIVATE' WHERE is_shared = 0 AND (share_scope IS NULL OR share_scope = '')").run(); } catch (_) {}
+
+  // Populate checklists seed if empty
+  const checklistCount = db.prepare('SELECT COUNT(*) as count FROM checklists').get() as { count: number };
+  if (checklistCount.count === 0) {
+    const insertChk = db.prepare(`
+      INSERT INTO checklists (id, title, category, created_by_id, created_by_name, is_shared, color, items, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const now = new Date().toISOString();
+
+    // 1. Team-Checkliste von Leitung (Geteilt)
+    insertChk.run(
+      'chk_1',
+      'Schließdienst & Sicherheitsrundgang Kita Sonnenschein',
+      'ROUTINE',
+      's_sabine',
+      'Sabine Weber (Leitung)',
+      1,
+      '#4f46e5',
+      JSON.stringify([
+        { id: 'i1', text: 'Fenster und Balkontüren in allen 3 Gruppen schließen', done: true, completed_by: 'Lukas Wagner' },
+        { id: 'i2', text: 'Außengelände prüfen: Sandkasten abdecken & Gartentor verriegeln', done: true, completed_by: 'Sarah Klein' },
+        { id: 'i3', text: 'Teeküche & Gruppenküchen kontrollieren (Herd aus, Spülmaschine gestartet)', done: false },
+        { id: 'i4', text: 'Haupteingang verriegeln & Alarmanlage scharf schalten', done: false }
+      ]),
+      now, now
+    );
+
+    // 2. Morgenroutine & Raumklima (Geteilt)
+    insertChk.run(
+      'chk_2',
+      'Morgenroutine & Ankommensvorbereitung',
+      'ROUTINE',
+      's_sabine',
+      'Sabine Weber (Leitung)',
+      1,
+      '#059669',
+      JSON.stringify([
+        { id: 'i5', text: 'Stoßlüftung aller Gruppenräume & Raumtemperatur checken', done: true, completed_by: 'Anna Schmidt' },
+        { id: 'i6', text: 'Anwesenheitslisten & Allergie-Notizen bereitlegen', done: true, completed_by: 'Anna Schmidt' },
+        { id: 'i7', text: 'Frühstücks-Buffet & frisches Obst anrichten', done: false }
+      ]),
+      now, now
+    );
+
+    // 3. Ausflugs-Vorbereitung (Geteilt vom Mitarbeiter Lukas Wagner)
+    insertChk.run(
+      'chk_3',
+      'Waldtag-Vorbereitung & Natur-Exkursion',
+      'AUSFLUG',
+      's_lukas',
+      'Lukas Wagner (Mitarbeiter 1)',
+      1,
+      '#d97706',
+      JSON.stringify([
+        { id: 'i8', text: 'Notfallhandy aufladen & Erste-Hilfe-Set Kind einpacken', done: true, completed_by: 'Lukas Wagner' },
+        { id: 'i9', text: 'Einverständniserklärungen der Eltern kontrollieren', done: true, completed_by: 'Lukas Wagner' },
+        { id: 'i10', text: 'Sitzkissen, Becherlupen & Becher für 20 Kinder in Bollerwagen', done: false },
+        { id: 'i11', text: 'Wetterbericht prüfen & Zeckenschutz sprayen', done: false }
+      ]),
+      now, now
+    );
+
+    // 4. Persönliche Checkliste von Sarah Klein (Privat - nur für sie!)
+    insertChk.run(
+      'chk_4',
+      'Meine Entwicklungsdokumentation & Portfolios',
+      'PERSÖNLICH',
+      's_sarah',
+      'Sarah Klein (Mitarbeiter 2)',
+      0, // PRIVAT!
+      '#ec4899',
+      JSON.stringify([
+        { id: 'i12', text: 'Fotodokumentation für Mias Eingewöhnungsmappe drucken', done: true, completed_by: 'Sarah Klein' },
+        { id: 'i13', text: 'Sprachentwicklungsbogen U3 für Maximilian ausfüllen', done: false },
+        { id: 'i14', text: 'Termine für Entwicklungsgespräche im November abstimmen', done: false }
+      ]),
+      now, now
+    );
+  }
 
   // Check if seeding or updating skills is needed
   updateStaffSkillsSeed();
+
+  // Populate children, emergency contacts, health records, attendance and ratio settings
+  seedChildModuleData();
+}
+
+function seedChildModuleData() {
+  const now = new Date().toISOString();
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+
+  // 1. Ratio Settings
+  const ratioCount = db.prepare('SELECT COUNT(*) as count FROM ratio_settings').get() as { count: number };
+  if (ratioCount.count === 0) {
+    const insertRatio = db.prepare(`
+      INSERT INTO ratio_settings (
+        id, group_id, target_ratio, warning_threshold_percent, critical_threshold_percent,
+        two_person_rule, core_time_start, core_time_end, min_qualification_quote, bundesland_preset
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertRatio.run('rs_default', null, 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
+    insertRatio.run('rs_u3', 'g_u3_maeuse', 3.33, 15.0, 25.0, 1, '08:30', '12:30', 0.67, 'NRW_KIBIZ');
+    insertRatio.run('rs_ue3_sonne', 'g_ue3_sonne', 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
+    insertRatio.run('rs_ue3_wald', 'g_ue3_wald', 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
+  }
+
+  // 2. Children & related records
+  const childCount = db.prepare('SELECT COUNT(*) as count FROM children').get() as { count: number };
+  if (childCount.count === 0) {
+    const insertChild = db.prepare(`
+      INSERT INTO children (id, group_id, first_name, last_name, birth_date, gender, photo_url, care_hours, contract_start, contract_end, active, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertHealth = db.prepare(`
+      INSERT INTO child_health_records (child_id, allergies, dietary_needs, medication_plan, emergency_instructions, measles_vaccinated, doctor_name, doctor_phone)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertContact = db.prepare(`
+      INSERT INTO emergency_contacts (id, child_id, name, relationship, phone_primary, phone_secondary, priority)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertPickup = db.prepare(`
+      INSERT INTO pickup_authorizations (id, child_id, name, relationship, phone, id_card_number, photo_url, is_forbidden, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertAttendance = db.prepare(`
+      INSERT INTO child_attendance (id, child_id, group_id, date, status, check_in_time, check_out_time, picked_up_by, absence_reason, meal_ordered, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    // U3 Krabbelmäuse (10 Kinder)
+    const u3Kids = [
+      { id: 'c_u3_1', first: 'Leo', last: 'Bergmann', dob: '2024-04-12', gender: 'M', hours: 45 },
+      { id: 'c_u3_2', first: 'Mia', last: 'Schneider', dob: '2024-06-15', gender: 'W', hours: 35 },
+      { id: 'c_u3_3', first: 'Noah', last: 'Müller', dob: '2024-01-20', gender: 'M', hours: 45 },
+      { id: 'c_u3_4', first: 'Emma', last: 'Fischer', dob: '2024-03-08', gender: 'W', hours: 35 },
+      { id: 'c_u3_5', first: 'Ben', last: 'Wagner', dob: '2024-07-22', gender: 'M', hours: 25 },
+      { id: 'c_u3_6', first: 'Sophia', last: 'Becker', dob: '2024-09-10', gender: 'W', hours: 35 },
+      { id: 'c_u3_7', first: 'Elias', last: 'Weber', dob: '2024-02-14', gender: 'M', hours: 45 },
+      { id: 'c_u3_8', first: 'Lina', last: 'Meyer', dob: '2024-08-05', gender: 'W', hours: 35 },
+      { id: 'c_u3_9', first: 'Jonas', last: 'Hoffmann', dob: '2024-05-18', gender: 'M', hours: 45 },
+      { id: 'c_u3_10', first: 'Mila', last: 'Schulz', dob: '2024-10-02', gender: 'W', hours: 35 },
+    ];
+
+    u3Kids.forEach(k => {
+      insertChild.run(k.id, 'g_u3_maeuse', k.first, k.last, k.dob, k.gender, null, k.hours, '2024-08-01', null, 1, now);
+      // Health default
+      insertHealth.run(
+        k.id,
+        k.id === 'c_u3_1' ? JSON.stringify(['Laktose']) : (k.id === 'c_u3_3' ? JSON.stringify(['Erdnuss']) : '[]'),
+        k.id === 'c_u3_1' ? 'Laktosefreie Kost / Hafermilch' : null,
+        null,
+        k.id === 'c_u3_3' ? '⚠️ Notfallset mit EpiPen im Medizinfach Krippe 1. Sofort 112 rufen!' : null,
+        1,
+        'Dr. med. Weber (Kinderarzt)',
+        '0221-554433'
+      );
+    });
+
+    // U3 Emergency & Pickup
+    insertContact.run('ec_1', 'c_u3_1', 'Anna Bergmann', 'Mutter', '0171-1122334', '0221-889911', 1);
+    insertContact.run('ec_2', 'c_u3_1', 'Michael Bergmann', 'Vater', '0171-5566778', null, 2);
+    insertContact.run('ec_3', 'c_u3_3', 'Susanne Müller', 'Mutter', '0172-8899001', null, 1);
+
+    insertPickup.run('pa_1', 'c_u3_1', 'Hilde Bergmann', 'Großmutter', '0175-9988776', 'T22000123', null, 0, 'Darf dienstags und donnerstags abholen');
+
+    // U3 Attendance for today: 9 present, 1 sick
+    u3Kids.forEach((k, idx) => {
+      if (idx === 9) {
+        insertAttendance.run(`att_${k.id}_${todayStr}`, k.id, 'g_u3_maeuse', todayStr, 'absent_sick', null, null, null, 'Erkältung & Husten', 0, now);
+      } else {
+        insertAttendance.run(`att_${k.id}_${todayStr}`, k.id, 'g_u3_maeuse', todayStr, 'present', '08:00', null, null, null, 1, now);
+      }
+    });
+
+    // Ü3 Sonnenschein (25 Kinder)
+    const sonneNames = [
+      ['Felix', 'Bauer'], ['Hannah', 'Koch'], ['Paul', 'Richter'], ['Emilia', 'Wolf'], ['Luca', 'Braun'],
+      ['Laura', 'Zimmermann'], ['David', 'Hartmann'], ['Clara', 'Lange'], ['Maximilian', 'Schmitt'], ['Marie', 'Krause'],
+      ['Julian', 'Meier'], ['Lea', 'Frank'], ['Tim', 'Schwarz'], ['Sophie', 'Neumann'], ['Niklas', 'Krämer'],
+      ['Elena', 'Vogel'], ['Fabian', 'Fuchs'], ['Amelie', 'Keller'], ['Jan', 'Peters'], ['Sarah', 'Lorenz'],
+      ['Moritz', 'Beck'], ['Ida', 'Roth'], ['Mats', 'Sommer'], ['Maya', 'Engel'], ['Finn', 'Groß']
+    ];
+
+    sonneNames.forEach(([first, last], idx) => {
+      const kidId = `c_ue3_s${idx + 1}`;
+      const dob = `2021-${String((idx % 12) + 1).padStart(2, '0')}-15`;
+      insertChild.run(kidId, 'g_ue3_sonne', first, last, dob, idx % 2 === 0 ? 'M' : 'W', null, 35, '2023-08-01', null, 1, now);
+      insertHealth.run(
+        kidId,
+        idx === 0 ? JSON.stringify(['Hühnerei']) : '[]',
+        idx === 0 ? 'Kein rohes oder gekochtes Ei' : null,
+        null, null, 1, 'Dr. med. Weber', '0221-554433'
+      );
+
+      // Attendance: Exactly 8 children are reported ABSENT_SICK (creates Auto-Balancing demo!)
+      // 17 children are present.
+      if (idx >= 17) {
+        insertAttendance.run(
+          `att_${kidId}_${todayStr}`, kidId, 'g_ue3_sonne', todayStr, 'absent_sick',
+          null, null, null, 'Grippaler Infekt / Fieber', 0, now
+        );
+      } else {
+        insertAttendance.run(
+          `att_${kidId}_${todayStr}`, kidId, 'g_ue3_sonne', todayStr, 'present',
+          '08:15', null, null, null, 1, now
+        );
+      }
+    });
+
+    // Ü3 Sonnenschein Emergency & Forbidden Pickup Test
+    insertContact.run('ec_4', 'c_ue3_s1', 'Sabine Bauer', 'Mutter', '0173-4455667', null, 1);
+    insertPickup.run('pa_2', 'c_ue3_s1', 'Klaus Bauer', 'Großvater', '0176-3322110', 'L8899221', null, 0, 'Nach telefonischer Absprache');
+    insertPickup.run('pa_3', 'c_ue3_s1', 'Thomas Meier', 'Ehemaliger Partner', null, null, null, 1, '⚠️ GERICHTLICHE VERFÜGUNG: Kein Aufenthaltsbestimmungsrecht, darf das Kind keinesfalls abholen!');
+
+    // Ü3 Waldwichtel (24 Kinder)
+    const waldNames = [
+      ['Anton', 'Huber'], ['Leni', 'Kaiser'], ['Oskar', 'Kunz'], ['Mia', 'Seidel'], ['Theo', 'Voigt'],
+      ['Ella', 'Schuster'], ['Jakob', 'Böhm'], ['Lotta', 'Haas'], ['Emil', 'Zander'], ['Klara', 'Dietrich'],
+      ['Henry', 'Pohl'], ['Mathilda', 'Horn'], ['Leo', 'Busch'], ['Greta', 'Franke'], ['Levi', 'Wolff'],
+      ['Frieda', 'Lorenz'], ['Theo', 'Kühn'], ['Mila', 'Arnold'], ['Luis', 'Beyer'], ['Luisa', 'Schubert'],
+      ['Ben', 'Vogel'], ['Charlotte', 'Kraus'], ['Samuel', 'Graf'], ['Theresa', 'König']
+    ];
+
+    waldNames.forEach(([first, last], idx) => {
+      const kidId = `c_ue3_w${idx + 1}`;
+      const dob = `2022-${String((idx % 12) + 1).padStart(2, '0')}-10`;
+      insertChild.run(kidId, 'g_ue3_wald', first, last, dob, idx % 2 === 0 ? 'M' : 'W', null, 35, '2024-08-01', null, 1, now);
+      insertHealth.run(kidId, '[]', null, null, null, 1, 'Dr. med. Weber', '0221-554433');
+      insertAttendance.run(
+        `att_${kidId}_${todayStr}`, kidId, 'g_ue3_wald', todayStr, 'present',
+        '08:30', null, null, null, 1, now
+      );
+    });
+  }
+
+  // Parent accounts & links
+  const insertParent = db.prepare(`
+    INSERT OR REPLACE INTO parent_accounts (id, email, password_hash, name, phone, preferred_language, role, board_position, mandatory_hours, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  // Anna Bergmann ist Eltern-Vorstandsvorsitzende (1. Vorsitzende e.V.)
+  insertParent.run('p_anna_bergmann', 'eltern@kita.de', 'admin', 'Anna Bergmann', '0171-1122334', 'de', 'VORSTAND', '1_VORSITZ', 20.0, now);
+  // Michael Bauer ist reguläres Elternteil
+  insertParent.run('p_michael_bauer', 'bauer@eltern.de', 'admin', 'Michael Bauer', '0172-5544332', 'de', 'ELTERN', null, 20.0, now);
+
+  const insertParentLink = db.prepare(`
+    INSERT OR IGNORE INTO parent_child_links (parent_id, child_id, is_primary_contact, photo_consent)
+    VALUES (?, ?, ?, ?)
+  `);
+  insertParentLink.run('p_anna_bergmann', 'c_u3_1', 1, 1);
+  insertParentLink.run('p_michael_bauer', 'c_ue3_s1', 1, 1);
+
+  // LAGE.app Seed: Elterndienste & Arbeitseinsätze
+  const dutyCount = db.prepare('SELECT COUNT(*) as count FROM parent_duties').get() as { count: number };
+  if (dutyCount.count === 0) {
+    const insertDuty = db.prepare(`
+      INSERT INTO parent_duties (id, title, description, category, hours_credit, max_helpers, date, time_start, time_end, location, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const nextSaturday = format(addDays(new Date(), 5), 'yyyy-MM-dd');
+    const inTwoWeeks = format(addDays(new Date(), 14), 'yyyy-MM-dd');
+
+    insertDuty.run(
+      'duty_1',
+      'Herbst-Gartenaktion: Außengelände & Sandkasten winterfest machen',
+      'Laub rechen, Sonnensegel abbauen, Hecken stutzen und Hackschnitzel verteilen. Bitte Gartenhandschuhe mitbringen!',
+      'GARTEN', 4.0, 8, nextSaturday, '09:30', '13:30', 'Kita-Außengelände', 'OPEN', now
+    );
+
+    insertDuty.run(
+      'duty_2',
+      'Notfall-Kochdienst bei Catering-Lieferausfall',
+      'Kurzfristiges Zubereiten von Bio-Nudeln mit Tomatensauce & Gemüsesticks für 40 Kinder in der Kita-Küche.',
+      'NOTFALL_KOCHEN', 3.0, 2, format(addDays(new Date(), 2), 'yyyy-MM-dd'), '10:00', '13:00', 'Kita-Küche', 'OPEN', now
+    );
+
+    insertDuty.run(
+      'duty_3',
+      'Laternenfest: Waffelstand & Kinderpunsch-Ausgabe',
+      'Unterstützung beim Teig backen, Ausgabe von warmem Apfelpunsch und Weckmännern.',
+      'FEST', 2.5, 4, inTwoWeeks, '16:30', '19:00', 'Kita-Garten Pavillon', 'OPEN', now
+    );
+
+    // Anna Bergmann hat bereits einen Dienst erledigt
+    const insertSignup = db.prepare(`
+      INSERT INTO parent_duty_signups (id, duty_id, parent_id, hours_credited, status, confirmed_by, completed_at, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertSignup.run('signup_1', 'duty_1', 'p_anna_bergmann', 4.0, 'CONFIRMED', 'Sabine Weber', now, now);
+  }
+
+  // LAGE.app Seed: Blitz-Umfragen
+  const pollCount = db.prepare('SELECT COUNT(*) as count FROM parent_polls').get() as { count: number };
+  if (pollCount.count === 0) {
+    db.prepare(`
+      INSERT INTO parent_polls (id, title, question, category, created_by_id, created_by_name, expires_at, is_closed, allow_multiple, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
+    `).run(
+      'poll_1',
+      'Terminabstimmung: Kita-Sommerfest 2027',
+      'An welchem Samstag soll unser großes Sommerfest mit Eltern-Picknick im Garten stattfinden?',
+      'FESTE', 's_sabine', 'Sabine Weber (Leitung)',
+      format(addDays(new Date(), 20), 'yyyy-MM-dd'),
+      now
+    );
+
+    const insertOpt = db.prepare(`
+      INSERT INTO parent_poll_options (id, poll_id, option_text, vote_count)
+      VALUES (?, ?, ?, ?)
+    `);
+    insertOpt.run('opt_1', 'poll_1', 'Samstag, 12. Juni (14:00 - 18:00 Uhr)', 6);
+    insertOpt.run('opt_2', 'poll_1', 'Samstag, 19. Juni (14:00 - 18:00 Uhr)', 14);
+    insertOpt.run('opt_3', 'poll_1', 'Samstag, 26. Juni (14:00 - 18:00 Uhr)', 4);
+  }
+
+  // LAGE.app Seed: Digitale Dokumente & Signaturen
+  const docCount = db.prepare('SELECT COUNT(*) as count FROM digital_documents').get() as { count: number };
+  if (docCount.count === 0) {
+    const insertDoc = db.prepare(`
+      INSERT INTO digital_documents (id, title, document_type, child_id, parent_id, content_html, status, signature_data, signed_at, signed_by_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    // 1. Bereits digital unterschriebene Fotoeinwilligung
+    insertDoc.run(
+      'doc_1',
+      'DSGVO Foto- & Medien-Einwilligung 2026/27',
+      'FOTOERLAUBNIS', 'c_u3_1', 'p_anna_bergmann',
+      '<p>Ich willige ein, dass Fotos meines Kindes für interne Gruppen-Aushänge und das Portfolio verwendet werden dürfen.</p>',
+      'SIGNED', 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjxwYXRoIGQ9Ik0xMCAxMCBMMTAwIDEwMCIvPjwvc3ZnPg==',
+      now, 'Anna Bergmann', now
+    );
+
+    // 2. Zur Unterschrift ausstehender Betreuungsvertrag
+    insertDoc.run(
+      'doc_2',
+      'Betreuungsvertrag 35-Stunden-Blocköffnung 2026/27',
+      'BETREUUNGSVERTRAG', 'c_ue3_s1', 'p_michael_bauer',
+      '<p>Vereinbarung über die Betreuung von Felix Bauer in der Elementargruppe Sonnenschein mit 35 Wochenstunden.</p>',
+      'PENDING_SIGNATURE', null, null, null, now
+    );
+  }
+
+  // Dedizierte Kiosk-Geräte-Accounts
+  const kioskCount = db.prepare('SELECT COUNT(*) as count FROM kiosk_devices').get() as { count: number };
+  if (kioskCount.count === 0) {
+    const insertKiosk = db.prepare(`
+      INSERT INTO kiosk_devices (id, name, group_id, pin, device_token, last_active)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertKiosk.run('kiosk_krabbelmaeuse', 'Gruppen-Tablet Krabbelmäuse U3', 'g_u3_maeuse', '1234', 'tok_krippe_u3', now);
+    insertKiosk.run('kiosk_sonnenschein', 'Gruppen-Tablet Sonnenschein Ü3', 'g_ue3_sonne', '1234', 'tok_sonne_ue3', now);
+    insertKiosk.run('kiosk_waldwichtel', 'Gruppen-Tablet Waldwichtel Ü3', 'g_ue3_wald', '1234', 'tok_wald_ue3', now);
+    insertKiosk.run('kiosk_eingang', 'Stationäres Eingangs-Terminal', null, '1234', 'tok_terminal_main', now);
+  }
+
+  // Seed Announcements / Schwarzes Brett & Elternbriefe
+  const annCount = db.prepare('SELECT COUNT(*) as count FROM announcements').get() as { count: number };
+  if (annCount.count === 0) {
+    const insertAnn = db.prepare(`
+      INSERT INTO announcements (id, title, content, priority, author, date)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertAnn.run(
+      'ann_1',
+      '🏮 Vorbereitung Laternenfest & St. Martin',
+      'Am 10. November feiern wir unser traditionelles Laternenfest ab 16:30 Uhr im Kita-Garten. Bitte bringt wetterfeste Kleidung und einen elektrischen Laternenstab mit. Für warmen Bio-Apfelpunsch und Weckmänner ist gesorgt!',
+      'HIGH',
+      'Sabine Weber (Leitung)',
+      format(new Date(), 'yyyy-MM-dd')
+    );
+    insertAnn.run(
+      'ann_2',
+      '🚨 Schließtag: Pädagogischer Fachtag',
+      'Liebe Eltern, bitte beachten Sie, dass die Kita am kommenden Freitag wegen eines ganztägigen pädagogischen Fachtags für das Gesamtteam geschlossen bleibt.',
+      'NORMAL',
+      'Sabine Weber (Leitung)',
+      format(addDays(new Date(), -2), 'yyyy-MM-dd')
+    );
+    insertAnn.run(
+      'ann_3',
+      '🍏 Neues Bio-Catering & Speiseplan-Abstimmung',
+      'Ab nächstem Monat starten wir mit unserem neuen regionalen Bio-Caterer "Grüne Küche". In der Eltern-App finden Sie eine Blitz-Umfrage zu den neuen Lieblingsgerichten!',
+      'NORMAL',
+      'Anna Bergmann (Vorstand e.V.)',
+      format(addDays(new Date(), -5), 'yyyy-MM-dd')
+    );
+  }
+
+  // Seed Child Daily Logs (U3 Schlaftagebuch, Mahlzeiten, Windel)
+  const logCount = db.prepare('SELECT COUNT(*) as count FROM child_daily_logs').get() as { count: number };
+  if (logCount.count === 0) {
+    const insertLog = db.prepare(`
+      INSERT INTO child_daily_logs (id, child_id, date, log_type, time_start, time_end, details, staff_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    insertLog.run('log_1', 'c_u3_1', todayStr, 'SLEEP', '12:30', '14:00', 'Ruhig geschlafen mit Lieblingskuscheltuch', 's_elena', now);
+    insertLog.run('log_2', 'c_u3_1', todayStr, 'MEAL', '11:45', null, 'Kartoffel-Möhren-Püree komplett aufgegessen & Nachtisch genossen', 's_elena', now);
+    insertLog.run('log_3', 'c_u3_1', todayStr, 'DIAPER', '14:15', null, 'Gewickelt (nass, alles i.O.)', 's_jonas', now);
+    insertLog.run('log_4', 'c_u3_1', todayStr, 'NOTE', '10:15', null, 'Hat heute begeistert mit Bauklötzen einen hohen Turm gebaut!', 's_elena', now);
+  }
 }
 
 function updateStaffSkillsSeed() {

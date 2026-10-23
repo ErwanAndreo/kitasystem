@@ -81,11 +81,12 @@ class _RosterScreenState extends State<RosterScreen> {
               const SizedBox(height: 14),
 
               DropdownButtonFormField<String>(
+                isExpanded: true,
                 initialValue: wishType,
                 items: const [
-                  DropdownMenuItem(value: 'WUNSCH_FRUEH', child: Text('🌅 Frühdienst bevorzugt')),
-                  DropdownMenuItem(value: 'WUNSCH_SPAET', child: Text('🌆 Spätdienst bevorzugt')),
-                  DropdownMenuItem(value: 'WUNSCH_FREI', child: Text('🚫 Wunschfrei (Termin/Ruhetag)')),
+                  DropdownMenuItem(value: 'WUNSCH_FRUEH', child: Text('🌅 Frühdienst bevorzugt', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                  DropdownMenuItem(value: 'WUNSCH_SPAET', child: Text('🌆 Spätdienst bevorzugt', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                  DropdownMenuItem(value: 'WUNSCH_FREI', child: Text('🚫 Wunschfrei (Termin/Ruhetag)', overflow: TextOverflow.ellipsis, maxLines: 1)),
                 ],
                 onChanged: (val) => setSheetState(() => wishType = val ?? 'WUNSCH_FRUEH'),
                 decoration: InputDecoration(

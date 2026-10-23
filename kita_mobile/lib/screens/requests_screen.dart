@@ -62,95 +62,98 @@ class _RequestsScreenState extends State<RequestsScreen> {
             top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Schichtwunsch einreichen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              const Text('Wunschdienste werden der Einrichtungsleitung direkt im Dienstplaner angezeigt.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-              const SizedBox(height: 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Schichtwunsch einreichen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                const Text('Wunschdienste werden der Einrichtungsleitung direkt im Dienstplaner angezeigt.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                const SizedBox(height: 16),
 
-              const Text('Datum des Wunschdienstes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.calendar_today, size: 16),
-                label: Text(DateFormat('dd.MM.yyyy').format(selectedDate)),
-                onPressed: () async {
-                  final picked = await showDatePicker(
-                    context: ctx,
-                    initialDate: selectedDate,
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 90)),
-                  );
-                  if (picked != null) {
-                    setSheetState(() => selectedDate = picked);
-                  }
-                },
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 44),
-                  alignment: Alignment.centerLeft,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              const Text('Art des Wunsches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                initialValue: selectedType,
-                items: const [
-                  DropdownMenuItem(value: 'WUNSCH_FRUEH', child: Text('🌅 Frühdienst (7:30 - 15:30)')),
-                  DropdownMenuItem(value: 'WUNSCH_SPAET', child: Text('🌆 Spätdienst (8:30 - 17:30)')),
-                  DropdownMenuItem(value: 'WUNSCH_FREI', child: Text('🚫 Wunschfrei (Ruhetag / Termin)')),
-                ],
-                onChanged: (val) => setSheetState(() => selectedType = val ?? 'WUNSCH_FRUEH'),
-                decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-              ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: noteController,
-                decoration: InputDecoration(
-                  labelText: 'Begründung / Notiz (optional)',
-                  hintText: 'z.B. Wichtiger Facharzttermin...',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
+                const Text('Datum des Wunschdienstes', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text(DateFormat('dd.MM.yyyy').format(selectedDate)),
                   onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    Navigator.pop(ctx);
-                    await ApiService.requestWish(
-                      staffId: widget.currentUser.id,
-                      date: DateFormat('yyyy-MM-dd').format(selectedDate),
-                      type: selectedType,
-                      note: noteController.text,
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: selectedDate,
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 90)),
                     );
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Schichtwunsch hinterlegt! Leitung sieht diesen bei der Planung.'),
-                        backgroundColor: Color(0xFF4F46E5),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                    _loadData();
+                    if (picked != null) {
+                      setSheetState(() => selectedDate = picked);
+                    }
                   },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4F46E5),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 44),
+                    alignment: Alignment.centerLeft,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Wunschdienst einreichen', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+
+                const Text('Art des Wunsches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: selectedType,
+                  items: const [
+                    DropdownMenuItem(value: 'WUNSCH_FRUEH', child: Text('🌅 Frühdienst (7:30 - 15:30)', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                    DropdownMenuItem(value: 'WUNSCH_SPAET', child: Text('🌆 Spätdienst (8:30 - 17:30)', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                    DropdownMenuItem(value: 'WUNSCH_FREI', child: Text('🚫 Wunschfrei (Ruhetag / Termin)', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                  ],
+                  onChanged: (val) => setSheetState(() => selectedType = val ?? 'WUNSCH_FRUEH'),
+                  decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: noteController,
+                  decoration: InputDecoration(
+                    labelText: 'Begründung / Notiz (optional)',
+                    hintText: 'z.B. Wichtiger Facharzttermin...',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      Navigator.pop(ctx);
+                      await ApiService.requestWish(
+                        staffId: widget.currentUser.id,
+                        date: DateFormat('yyyy-MM-dd').format(selectedDate),
+                        type: selectedType,
+                        note: noteController.text,
+                      );
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text('Schichtwunsch hinterlegt! Leitung sieht diesen bei der Planung.'),
+                          backgroundColor: Color(0xFF4F46E5),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                      _loadData();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4F46E5),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Wunschdienst einreichen', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -176,85 +179,99 @@ class _RequestsScreenState extends State<RequestsScreen> {
             top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Schichttausch anfragen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              const Text('Frage eine Kollegin/einen Kollegen an. Nach deren Zusage geht es zur Freigabe an die Leitung.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-              const SizedBox(height: 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Schichttausch anfragen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                const Text('Frage eine Kollegin/einen Kollegen an. Nach deren Zusage geht es zur Freigabe an die Leitung.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                const SizedBox(height: 16),
 
-              const Text('Welche Schicht möchtest du tauschen?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                initialValue: selectedShiftId,
-                items: _userShifts.map((s) => DropdownMenuItem(
-                  value: s.id,
-                  child: Text('${s.date} (${s.startTime} - ${s.endTime} Uhr)', style: const TextStyle(fontSize: 12)),
-                )).toList(),
-                onChanged: (val) => setSheetState(() => selectedShiftId = val),
-                decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-              ),
-              const SizedBox(height: 12),
-
-              const Text('Wen möchtest du um Übernahme bitten?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                initialValue: selectedTargetId,
-                items: _allStaff.where((s) => s.id != widget.currentUser.id).map((s) => DropdownMenuItem(
-                  value: s.id,
-                  child: Text('${s.name} (${s.qualification})', style: const TextStyle(fontSize: 12)),
-                )).toList(),
-                onChanged: (val) => setSheetState(() => selectedTargetId = val),
-                decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-              ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: noteController,
-                decoration: InputDecoration(
-                  labelText: 'Grund / Notiz (optional)',
-                  hintText: 'z.B. Wichtiger Termin...',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                const Text('Welche Schicht möchtest du tauschen?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: selectedShiftId,
+                  items: _userShifts.map((s) => DropdownMenuItem(
+                    value: s.id,
+                    child: Text(
+                      '${s.date} (${s.startTime} - ${s.endTime} Uhr)',
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  )).toList(),
+                  onChanged: (val) => setSheetState(() => selectedShiftId = val),
+                  decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
                 ),
-              ),
-              const SizedBox(height: 16),
+                const SizedBox(height: 12),
 
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () async {
-                    if (selectedShiftId != null && selectedTargetId != null) {
-                      final messenger = ScaffoldMessenger.of(context);
-                      Navigator.pop(ctx);
-                      await ApiService.requestSwap(
-                        requesterId: widget.currentUser.id,
-                        targetId: selectedTargetId!,
-                        shiftId: selectedShiftId!,
-                        note: noteController.text,
-                      );
-                      messenger.showSnackBar(
-                        const SnackBar(
-                          content: Text('Tauschanfrage eingereicht! Wartet auf Freigabe der Leitung.'),
-                          backgroundColor: Color(0xFF16A34A),
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                      _loadData();
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                const Text('Wen möchtest du um Übernahme bitten?', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: selectedTargetId,
+                  items: _allStaff.where((s) => s.id != widget.currentUser.id).map((s) => DropdownMenuItem(
+                    value: s.id,
+                    child: Text(
+                      '${s.name} (${s.qualification})',
+                      style: const TextStyle(fontSize: 12),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                  )).toList(),
+                  onChanged: (val) => setSheetState(() => selectedTargetId = val),
+                  decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+                ),
+                const SizedBox(height: 12),
+
+                TextField(
+                  controller: noteController,
+                  decoration: InputDecoration(
+                    labelText: 'Grund / Notiz (optional)',
+                    hintText: 'z.B. Wichtiger Termin...',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: const Text('Tausch anfragen', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      if (selectedShiftId != null && selectedTargetId != null) {
+                        final messenger = ScaffoldMessenger.of(context);
+                        Navigator.pop(ctx);
+                        await ApiService.requestSwap(
+                          requesterId: widget.currentUser.id,
+                          targetId: selectedTargetId!,
+                          shiftId: selectedShiftId!,
+                          note: noteController.text,
+                        );
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Tauschanfrage eingereicht! Wartet auf Freigabe der Leitung.'),
+                            backgroundColor: Color(0xFF16A34A),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        _loadData();
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Tausch anfragen', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -278,30 +295,32 @@ class _RequestsScreenState extends State<RequestsScreen> {
             top: 20,
             bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Urlaub / Abwesenheit einreichen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              const Text('Geht direkt zur verbindlichen Genehmigung an die Einrichtungsleitung.',
-                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-              const SizedBox(height: 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Urlaub / Abwesenheit einreichen', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                const Text('Geht direkt zur verbindlichen Genehmigung an die Einrichtungsleitung.',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                const SizedBox(height: 16),
 
-              DropdownButtonFormField<String>(
-                initialValue: reason,
-                items: const [
-                  DropdownMenuItem(value: 'Erholungsurlaub', child: Text('Erholungsurlaub')),
-                  DropdownMenuItem(value: 'Brückentag', child: Text('Brückentag')),
-                  DropdownMenuItem(value: 'Sonderurlaub', child: Text('Sonderurlaub')),
-                  DropdownMenuItem(value: 'Fortbildungstag', child: Text('Fortbildungstag')),
-                ],
-                onChanged: (val) => setSheetState(() => reason = val ?? 'Erholungsurlaub'),
-                decoration: InputDecoration(
-                  labelText: 'Art des Urlaubs',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  initialValue: reason,
+                  items: const [
+                    DropdownMenuItem(value: 'Erholungsurlaub', child: Text('Erholungsurlaub', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                    DropdownMenuItem(value: 'Brückentag', child: Text('Brückentag', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                    DropdownMenuItem(value: 'Sonderurlaub', child: Text('Sonderurlaub', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                    DropdownMenuItem(value: 'Fortbildungstag', child: Text('Fortbildungstag', overflow: TextOverflow.ellipsis, maxLines: 1)),
+                  ],
+                  onChanged: (val) => setSheetState(() => reason = val ?? 'Erholungsurlaub'),
+                  decoration: InputDecoration(
+                    labelText: 'Art des Urlaubs',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
-              ),
               const SizedBox(height: 12),
 
               Row(
@@ -378,8 +397,9 @@ class _RequestsScreenState extends State<RequestsScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   void _openSickNoticeDialog() {
     showDialog(
@@ -389,25 +409,28 @@ class _RequestsScreenState extends State<RequestsScreen> {
           children: [
             Icon(Icons.shield_outlined, color: Color(0xFFE11D48)),
             SizedBox(width: 8),
-            Text('Krankmeldung morgens', style: TextStyle(fontSize: 16)),
+            Text('Krankmeldung morgens', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
         content: const Text(
-          'Möchtest du dich für heute krankmelden? Die Einrichtungsleitung wird sofort alarmiert und die Vertretungsplanung aktiviert.',
+          'Möchtest du dich für heute krankmelden? Dies löst sofort eine Benachrichtigung bei der Leitung aus (je nach deren Einstellung als kritischer Notfall-Alarm oder einfach) und aktiviert die Vertretungsplanung.',
           style: TextStyle(fontSize: 13),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Abbrechen')),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Krankmeldung übermittelt. Gute Besserung!'),
-                  backgroundColor: Color(0xFFE11D48),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
+              await ApiService.submitSickNotice(widget.currentUser.id, 'Akute Krankmeldung morgens');
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Krankmeldung übermittelt & Leitung benachrichtigt. Gute Besserung!'),
+                    backgroundColor: Color(0xFFE11D48),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
             },
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE11D48), foregroundColor: Colors.white),
             child: const Text('Jetzt krankmelden'),
@@ -485,9 +508,12 @@ class _RequestsScreenState extends State<RequestsScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
-                          'Meine Schichtwünsche',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        const Expanded(
+                          child: Text(
+                            'Meine Schichtwünsche',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         Text(
                           '${_userWishes.length} aktiv',
@@ -571,9 +597,12 @@ class _RequestsScreenState extends State<RequestsScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Status meiner Anträge',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      const Expanded(
+                        child: Text(
+                          'Status meiner Anträge',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       Text(
                         '${_approvals.length} Vorgänge',

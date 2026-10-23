@@ -35,6 +35,7 @@ export const RatioRadar: React.FC<RatioRadarProps> = ({ groupsStatus, date }) =>
         {groupsStatus.map((g) => {
           const isCritical = g.status === 'CRITICAL';
           const isWarning = g.status === 'WARNING';
+          const isBalanced = g.status === 'BALANCED_OK';
 
           return (
             <div
@@ -44,6 +45,8 @@ export const RatioRadar: React.FC<RatioRadarProps> = ({ groupsStatus, date }) =>
                   ? 'bg-rose-50/60 border-rose-300 ring-1 ring-rose-300'
                   : isWarning
                   ? 'bg-amber-50/60 border-amber-300'
+                  : isBalanced
+                  ? 'bg-teal-50/50 border-teal-300 ring-1 ring-teal-200'
                   : 'bg-emerald-50/40 border-emerald-200'
               }`}
             >
@@ -58,6 +61,8 @@ export const RatioRadar: React.FC<RatioRadarProps> = ({ groupsStatus, date }) =>
                       ? 'bg-rose-600 text-white animate-pulse'
                       : isWarning
                       ? 'bg-amber-500 text-white'
+                      : isBalanced
+                      ? 'bg-teal-600 text-white'
                       : 'bg-emerald-600 text-white'
                   }`}
                 >
@@ -71,6 +76,11 @@ export const RatioRadar: React.FC<RatioRadarProps> = ({ groupsStatus, date }) =>
                       <AlertTriangle className="w-3 h-3" />
                       <span>Grenzbereich</span>
                     </>
+                  ) : isBalanced ? (
+                    <>
+                      <UserCheck className="w-3 h-3" />
+                      <span>Auto-Balancing ✓</span>
+                    </>
                   ) : (
                     <>
                       <CheckCircle className="w-3 h-3" />
@@ -83,28 +93,62 @@ export const RatioRadar: React.FC<RatioRadarProps> = ({ groupsStatus, date }) =>
               {/* Ratios Metrics */}
               <div className="grid grid-cols-2 gap-2 my-2.5 p-2 bg-white rounded-lg border border-slate-200/80 shadow-2xs">
                 <div>
-                  <div className="text-[10px] uppercase font-semibold text-slate-400">Schlüssel Ist</div>
-                  <div className={`text-lg font-extrabold ${isCritical ? 'text-rose-600' : 'text-slate-800'}`}>
+                  <div className="text-[10px] uppercase font-semibold text-slate-400">
+                    {isBalanced ? 'Real-Schlüssel' : 'Schlüssel Ist'}
+                  </div>
+                  <div className={`text-lg font-extrabold ${isCritical ? 'text-rose-600' : isBalanced ? 'text-teal-700' : 'text-slate-800'}`}>
                     1 : {g.actual_ratio > 50 ? '—' : g.actual_ratio.toFixed(1)}
                   </div>
-                  <div className="text-[10px] text-slate-400">Soll: 1 : {g.target_ratio}</div>
+                  <div className="text-[10px] text-slate-400">
+                    Soll: 1 : {g.target_ratio}
+                    {g.static_ratio && g.static_ratio !== g.actual_ratio && (
+                      <span className="block text-[9px] text-slate-500 line-through">
+                        Soll-Besetzung: 1:{g.static_ratio.toFixed(1)}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div>
-                  <div className="text-[10px] uppercase font-semibold text-slate-400">Fachkraftquote</div>
-                  <div className="text-lg font-extrabold text-slate-800">
-                    {(g.actual_fachkraft_percent * 100).toFixed(0)}%
+                  <div className="text-[10px] uppercase font-semibold text-slate-400">
+                    {g.effective_children !== undefined ? 'Kinder im Haus' : 'Fachkraftquote'}
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    Min: {(g.min_fachkraft_percent * 100).toFixed(0)}%
-                  </div>
+                  {g.effective_children !== undefined ? (
+                    <>
+                      <div className="text-lg font-extrabold text-slate-800">
+                        {g.effective_children} <span className="text-xs font-normal text-slate-500">/ {g.enrolled_children || g.child_count}</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {(g.absent_children ?? 0) > 0 ? (
+                          <span className="text-emerald-600 font-semibold">{g.absent_children} abgemeldet</span>
+                        ) : (
+                          'Vollzählig'
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-lg font-extrabold text-slate-800">
+                        {(g.actual_fachkraft_percent * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        Min: {(g.min_fachkraft_percent * 100).toFixed(0)}%
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
 
               {/* Status Message */}
               <p
                 className={`text-xs mb-2.5 font-medium ${
-                  isCritical ? 'text-rose-700 font-semibold' : isWarning ? 'text-amber-800' : 'text-emerald-700'
+                  isCritical
+                    ? 'text-rose-700 font-semibold'
+                    : isWarning
+                    ? 'text-amber-800'
+                    : isBalanced
+                    ? 'text-teal-800 bg-teal-100/60 p-1.5 rounded-lg border border-teal-200'
+                    : 'text-emerald-700'
                 }`}
               >
                 {g.message}

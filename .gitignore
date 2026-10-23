@@ -1,8 +1,16 @@
 node_modules/
 dist/
 kita.sqlite*
+database.sqlite*
 backups/
 logs/
+*.log
+.env
+.env.*
+.DS_Store
+/*_screen*.png
+
+# Flutter
 kita_mobile/build/
 kita_mobile/.dart_tool/
-.DS_Store
+

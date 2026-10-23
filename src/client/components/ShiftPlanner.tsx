@@ -20,7 +20,16 @@ import {
   X,
   FileText,
   CheckCircle2,
-  Copy
+  Copy,
+  GripVertical,
+  Sliders,
+  Settings,
+  Edit3,
+  PanelRightClose,
+  PanelRightOpen,
+  Search,
+  ShieldAlert,
+  Info
 } from 'lucide-react';
 import { format, addDays, startOfWeek, subWeeks, addWeeks, getISOWeek } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -39,7 +48,16 @@ interface ShiftPlannerProps {
     end_time: string;
     break_minutes: number;
     role_override?: string;
-  }) => Promise<void>;
+  }) => Promise<any>;
+  onUpdateShift?: (id: string, data: {
+    staff_id?: string;
+    group_id?: string;
+    date?: string;
+    start_time?: string;
+    end_time?: string;
+    break_minutes?: number;
+    role_override?: string;
+  }) => Promise<any>;
   onDeleteShift: (id: string) => Promise<void>;
 }
 
@@ -50,6 +68,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   currentDate,
   setCurrentDate,
   onAddShift,
+  onUpdateShift,
   onDeleteShift
 }) => {
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
@@ -60,6 +79,43 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   const [closures, setClosures] = useState<KitaClosure[]>([]);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [copyLoading, setCopyLoading] = useState(false);
+
+  // Drag and Drop & Sidebar State
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [staffSearch, setStaffSearch] = useState<string>('');
+  const [draggedStaff, setDraggedStaff] = useState<Staff | null>(null);
+  const [dragOverCell, setDragOverCell] = useState<{ staffId: string; date: string } | null>(null);
+  const [recentLegalWarning, setRecentLegalWarning] = useState<{ title: string; details: string; shiftId?: string } | null>(null);
+
+  // Settings State (Standard-Arbeitszeit & ArbZG-Prüfung)
+  const [defaultDurationHours, setDefaultDurationHours] = useState<number>(8.0);
+  const [defaultStartTime, setDefaultStartTime] = useState<string>('08:00');
+  const [defaultBreakMinutes, setDefaultBreakMinutes] = useState<number>(30);
+  const [settingsModalOpen, setSettingsModalOpen] = useState<boolean>(false);
+  const [savingSettings, setSavingSettings] = useState<boolean>(false);
+
+  // Edit Shift State (Zeit anpassen im Kalender)
+  const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
+  const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [editFormData, setEditFormData] = useState<{
+    id: string;
+    staff_id: string;
+    group_id: string;
+    date: string;
+    start_time: string;
+    end_time: string;
+    break_minutes: number;
+    role_override: string;
+  }>({
+    id: '',
+    staff_id: '',
+    group_id: '',
+    date: '',
+    start_time: '08:00',
+    end_time: '16:30',
+    break_minutes: 30,
+    role_override: ''
+  });
 
   const [modalData, setModalData] = useState<{
     staff_id: string;
@@ -82,6 +138,41 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const weekDays = [0, 1, 2, 3, 4].map(offset => addDays(weekStart, offset));
   const weekNumber = getISOWeek(currentDate);
+
+  // Load Settings from Backend
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(data => {
+        if (data.default_shift_duration_hours !== undefined) {
+          setDefaultDurationHours(Number(data.default_shift_duration_hours));
+        }
+        if (data.default_shift_start_time) {
+          setDefaultStartTime(String(data.default_shift_start_time));
+        }
+        if (data.default_shift_break_minutes !== undefined) {
+          setDefaultBreakMinutes(Number(data.default_shift_break_minutes));
+        }
+      })
+      .catch(console.error);
+  }, []);
+
+  // Helper to calculate end time from start time + duration + break
+  const calculateEndTime = (start: string, durationHours: number, breakMins: number): string => {
+    const [h, m] = start.split(':').map(Number);
+    const totalMinutes = Math.round(h * 60 + m + durationHours * 60 + breakMins);
+    const endH = Math.floor((totalMinutes % (24 * 60)) / 60);
+    const endM = totalMinutes % 60;
+    return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+  };
+
+  // Helper to calculate net hours between two times
+  const calculateNetHours = (start: string, end: string, breakMins: number): number => {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const gross = (eh + em / 60) - (sh + sm / 60);
+    return Math.max(0, Number((gross - breakMins / 60).toFixed(2)));
+  };
 
   // Load competitor-proven features: Shift Templates, Staff Wishes & Kita Closures
   useEffect(() => {
@@ -144,14 +235,23 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
     return s.target_group_id === selectedGroup || s.role === 'SPRINGER' || s.role === 'LEITUNG';
   });
 
+  const sidebarStaffList = staff.filter(s => {
+    if (!staffSearch.trim()) return true;
+    const query = staffSearch.toLowerCase();
+    return s.name.toLowerCase().includes(query) ||
+           s.role.toLowerCase().includes(query) ||
+           s.qualification.toLowerCase().includes(query) ||
+           (s.skills && s.skills.some(sk => sk.toLowerCase().includes(query)));
+  });
+
   const handleOpenNewShift = (staffId?: string, dateStr?: string) => {
     const sObj = staff.find(s => s.id === (staffId || staff[0]?.id));
     const targetDate = dateStr || format(new Date(), 'yyyy-MM-dd');
     
     // Check if employee has a wish on that day
     const employeeWish = wishes.find(w => w.staff_id === (staffId || staff[0]?.id) && w.date === targetDate);
-    let initialStart = '08:00';
-    let initialEnd = '16:30';
+    let initialStart = defaultStartTime;
+    let initialEnd = calculateEndTime(defaultStartTime, defaultDurationHours, defaultBreakMinutes);
     let defaultRoleOverride = sObj?.role === 'LEITUNG' ? 'Springer / Notfall-Unterstützung' : '';
 
     if (employeeWish) {
@@ -168,11 +268,11 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
     setModalData({
       staff_id: staffId || staff[0]?.id || '',
-      group_id: selectedGroup !== 'ALL' ? selectedGroup : groups[0]?.id || '',
+      group_id: sObj?.target_group_id || (selectedGroup !== 'ALL' ? selectedGroup : groups[0]?.id || ''),
       date: targetDate,
       start_time: initialStart,
       end_time: initialEnd,
-      break_minutes: 30,
+      break_minutes: defaultBreakMinutes,
       role_override: defaultRoleOverride
     });
     setModalOpen(true);
@@ -180,8 +280,156 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
   const handleSaveShift = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onAddShift(modalData);
+    const res = await onAddShift(modalData);
+    if (res?.warning) {
+      setRecentLegalWarning({
+        title: 'Rechtlicher Rahmen (ArbZG)',
+        details: res.warning,
+        shiftId: res.id
+      });
+    }
     setModalOpen(false);
+  };
+
+  // Drag and Drop Handler for Day Cells
+  const handleDragStart = (e: React.DragEvent, person: Staff) => {
+    setDraggedStaff(person);
+    const payload = JSON.stringify({
+      staffId: person.id,
+      staffName: person.name,
+      targetGroupId: person.target_group_id || groups[0]?.id || ''
+    });
+    e.dataTransfer.setData('text/plain', payload);
+    e.dataTransfer.setData('application/json', payload);
+    e.dataTransfer.effectAllowed = 'copy';
+  };
+
+  const handleDragEnd = () => {
+    setDraggedStaff(null);
+    setDragOverCell(null);
+  };
+
+  const handleCellDrop = async (e: React.DragEvent, cellStaffId: string, cellDate: string) => {
+    e.preventDefault();
+    setDragOverCell(null);
+
+    let assignedStaffId = cellStaffId;
+    let preferredGroupId = groups[0]?.id || '';
+
+    try {
+      const raw = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.staffId) {
+          assignedStaffId = parsed.staffId;
+          preferredGroupId = parsed.targetGroupId || preferredGroupId;
+        }
+      }
+    } catch (err) {
+      // Fallback to cellStaffId
+    }
+
+    const sObj = staff.find(s => s.id === assignedStaffId);
+    const assignedGroup = sObj?.target_group_id || preferredGroupId || (selectedGroup !== 'ALL' ? selectedGroup : groups[0]?.id || '');
+    const calculatedEnd = calculateEndTime(defaultStartTime, defaultDurationHours, defaultBreakMinutes);
+
+    try {
+      const res = await onAddShift({
+        staff_id: assignedStaffId,
+        group_id: assignedGroup,
+        date: cellDate,
+        start_time: defaultStartTime,
+        end_time: calculatedEnd,
+        break_minutes: defaultBreakMinutes,
+        role_override: sObj?.role === 'LEITUNG' ? 'Springer / Notfall-Unterstützung' : undefined
+      });
+
+      if (res?.warning) {
+        setRecentLegalWarning({
+          title: `Rechtlicher Hinweis (ArbZG) für ${sObj?.name || 'Mitarbeiter'}`,
+          details: res.warning,
+          shiftId: res.id
+        });
+      }
+    } catch (err: any) {
+      console.error('Error adding dropped shift:', err);
+    }
+  };
+
+  // Open Edit Shift Popover / Modal
+  const handleOpenEditShift = (sh: Shift) => {
+    setEditingShift(sh);
+    setEditFormData({
+      id: sh.id,
+      staff_id: sh.staff_id,
+      group_id: sh.group_id,
+      date: sh.date,
+      start_time: sh.start_time,
+      end_time: sh.end_time,
+      break_minutes: sh.break_minutes || 30,
+      role_override: sh.role_override || ''
+    });
+    setEditModalOpen(true);
+  };
+
+  // Save Adjusted Shift
+  const handleSaveEditShift = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingShift) return;
+
+    if (onUpdateShift) {
+      const res = await onUpdateShift(editingShift.id, editFormData);
+      if (res?.warning) {
+        setRecentLegalWarning({
+          title: `ArbZG-Hinweis für Schicht (${editingShift.staff_name})`,
+          details: res.warning,
+          shiftId: editingShift.id
+        });
+      }
+    }
+    setEditModalOpen(false);
+    setEditingShift(null);
+  };
+
+  // Quick adjust time buttons (+/- 30 min)
+  const adjustEditTime = (type: 'start' | 'end', deltaMinutes: number) => {
+    const current = type === 'start' ? editFormData.start_time : editFormData.end_time;
+    const [h, m] = current.split(':').map(Number);
+    let total = h * 60 + m + deltaMinutes;
+    if (total < 0) total = 0;
+    if (total >= 24 * 60) total = 23 * 60 + 59;
+    const newH = Math.floor(total / 60);
+    const newM = total % 60;
+    const formatted = `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+    
+    setEditFormData({
+      ...editFormData,
+      [type === 'start' ? 'start_time' : 'end_time']: formatted
+    });
+  };
+
+  // Save Settings Modal
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          default_shift_duration_hours: defaultDurationHours,
+          default_shift_start_time: defaultStartTime,
+          default_shift_break_minutes: defaultBreakMinutes
+        })
+      });
+      if (res.ok) {
+        setSettingsModalOpen(false);
+      }
+    } catch (err: any) {
+      alert('Fehler beim Speichern der Einstellungen: ' + err.message);
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   const activeEmployeeWish = wishes.find(
@@ -195,10 +443,10 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         <div>
           <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
             <Calendar className="w-4 h-4 text-emerald-600" />
-            <span>Wochendienstplan & Schichteinsatz</span>
+            <span>Wochendienstplan & Drag & Drop Schichteinsatz</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Dienstzeiten, Pausen, Schichtvorlagen & Mitarbeiterwünsche
+            Mitarbeiter aus rechter Liste per Drag & Drop reinziehen • Standardarbeitszeit {defaultDurationHours} Std. (in Einstellungen anpassbar)
           </p>
         </div>
 
@@ -242,7 +490,31 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
             </button>
           </div>
 
-          {/* Print & PDF Export (Competitor standout feature) */}
+          {/* Settings Button (Configures default duration, start time, ArbZG) */}
+          <button
+            onClick={() => setSettingsModalOpen(true)}
+            className="flex items-center space-x-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95 border border-slate-200"
+            title="Dienstplan-Einstellungen: Standard-Schichtdauer, Startzeit & Arbeitszeitprüfung anpassen"
+          >
+            <Sliders className="w-3.5 h-3.5 text-slate-600" />
+            <span>Standard: {defaultDurationHours}h</span>
+          </button>
+
+          {/* Sidebar Toggle Button */}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
+              sidebarOpen
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+            }`}
+            title="Mitarbeiter-Pool Sidebar (Drag & Drop) ein- oder ausblenden"
+          >
+            <GripVertical className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Drag & Drop Pool</span>
+          </button>
+
+          {/* Print & PDF Export */}
           <button
             onClick={() => setPrintOpen(true)}
             className="flex items-center space-x-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95 border border-slate-200"
@@ -260,7 +532,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
             title="Dienstplan der Vorwoche mit 1 Klick in diese Woche übernehmen"
           >
             <Copy className="w-3.5 h-3.5 text-indigo-600" />
-            <span>{copyLoading ? 'Kopiere...' : 'Vorwoche übernehmen'}</span>
+            <span>{copyLoading ? 'Kopiere...' : 'Vorwoche'}</span>
           </button>
 
           {/* Add shift */}
@@ -273,6 +545,36 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Recent Legal / ArbZG Warning Alert Banner (Nicht blockierend!) */}
+      {recentLegalWarning && (
+        <div className="mt-4 p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start justify-between shadow-2xs animate-fade-in">
+          <div className="flex items-start space-x-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold flex items-center space-x-2">
+                <span>{recentLegalWarning.title}</span>
+                <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded font-semibold">
+                  Eintragung autorisiert (nicht blockiert)
+                </span>
+              </div>
+              <p className="mt-0.5 text-amber-900 leading-relaxed font-medium">
+                {recentLegalWarning.details}
+              </p>
+              <div className="text-[11px] text-amber-800 mt-1 flex items-center space-x-1">
+                <Info className="w-3.5 h-3.5 shrink-0" />
+                <span>Gemäß Anforderung prüft das System den rechtlichen Rahmen und meldet Hinweise, verhindert das Eintragen jedoch nicht.</span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setRecentLegalWarning(null)}
+            className="text-amber-500 hover:text-amber-800 p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Copy week success alert */}
       {copyStatus && (
@@ -287,62 +589,358 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         </div>
       )}
 
-      {/* Roster Grid */}
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full border-collapse min-w-[850px]">
-          <thead>
-            <tr>
-              <th className="p-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 rounded-l-xl w-56">
-                Mitarbeiter / Skills
-              </th>
-              {weekDays.map((day, idx) => {
-                const dayStr = format(day, 'yyyy-MM-dd');
-                const isToday = dayStr === format(new Date(), 'yyyy-MM-dd');
-                const dayClosure = closures.find(c => c.date === dayStr);
+      {/* Main Roster Layout: Table on Left + Drag & Drop Staff Pool on Right */}
+      <div className="flex flex-col lg:flex-row gap-5 mt-4 items-start">
+        {/* Left Column: Calendar Roster Grid */}
+        <div className="flex-1 w-full overflow-x-auto min-w-0">
+          <table className="w-full border-collapse min-w-[780px]">
+            <thead>
+              <tr>
+                <th className="p-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50 rounded-l-xl w-52">
+                  Mitarbeiter / Skills
+                </th>
+                {weekDays.map((day, idx) => {
+                  const dayStr = format(day, 'yyyy-MM-dd');
+                  const isToday = dayStr === format(new Date(), 'yyyy-MM-dd');
+                  const dayClosure = closures.find(c => c.date === dayStr);
+
+                  return (
+                    <th
+                      key={idx}
+                      className={`p-3 text-center text-xs font-bold uppercase tracking-wider transition-colors ${
+                        dayClosure
+                          ? dayClosure.type === 'KONZEPTIONSTAG'
+                            ? 'bg-purple-50 text-purple-900 border-b-2 border-purple-400'
+                            : 'bg-rose-50 text-rose-900 border-b-2 border-rose-400'
+                          : isToday
+                            ? 'bg-emerald-50 text-emerald-900 border-b-2 border-emerald-500'
+                            : 'bg-slate-50 text-slate-600'
+                      } ${idx === 4 ? 'rounded-r-xl' : ''}`}
+                    >
+                      <div>{format(day, 'EEEE', { locale: de })}</div>
+                      <div className="text-[11px] font-normal text-slate-400">{format(day, 'dd.MM.')}</div>
+                      {dayClosure && (
+                        <div
+                          className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            dayClosure.type === 'KONZEPTIONSTAG'
+                              ? 'bg-purple-200 text-purple-900'
+                              : 'bg-rose-200 text-rose-900'
+                          }`}
+                          title={dayClosure.notes || dayClosure.title}
+                        >
+                          {dayClosure.type === 'KONZEPTIONSTAG' ? '📚 Teamtag' : '🏫 Schließtag'}
+                        </div>
+                      )}
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filteredStaff.map((person) => {
+                const isFachkraft = person.is_fachkraft === 1;
 
                 return (
-                  <th
-                    key={idx}
-                    className={`p-3 text-center text-xs font-bold uppercase tracking-wider transition-colors ${
-                      dayClosure
-                        ? dayClosure.type === 'KONZEPTIONSTAG'
-                          ? 'bg-purple-50 text-purple-900 border-b-2 border-purple-400'
-                          : 'bg-rose-50 text-rose-900 border-b-2 border-rose-400'
-                        : isToday
-                          ? 'bg-emerald-50 text-emerald-900 border-b-2 border-emerald-500'
-                          : 'bg-slate-50 text-slate-600'
-                    } ${idx === 4 ? 'rounded-r-xl' : ''}`}
-                  >
-                    <div>{format(day, 'EEEE', { locale: de })}</div>
-                    <div className="text-[11px] font-normal text-slate-400">{format(day, 'dd.MM.')}</div>
-                    {dayClosure && (
-                      <div
-                        className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          dayClosure.type === 'KONZEPTIONSTAG'
-                            ? 'bg-purple-200 text-purple-900'
-                            : 'bg-rose-200 text-rose-900'
-                        }`}
-                        title={dayClosure.notes || dayClosure.title}
-                      >
-                        {dayClosure.type === 'KONZEPTIONSTAG' ? '📚 Teamtag' : '🏫 Schließtag'}
+                  <tr key={person.id} className="hover:bg-slate-50/60 transition-colors">
+                    {/* Staff Info Col */}
+                    <td className="p-3 w-52">
+                      <div className="flex items-start space-x-2.5">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-xs shrink-0 mt-0.5"
+                          style={{ backgroundColor: person.color }}
+                        >
+                          {person.avatar}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">
+                            {person.name}
+                          </div>
+                          <div className="flex items-center space-x-1 text-[10px] text-slate-400 mt-0.5">
+                            <span className={isFachkraft ? 'text-blue-600 font-semibold' : 'text-slate-500'}>
+                              {person.role === 'LEITUNG' ? 'Leitung' : isFachkraft ? 'Fachkraft' : 'Ergänzungskraft'}
+                            </span>
+                            <span>•</span>
+                            <span>{person.weekly_hours}h</span>
+                          </div>
+
+                          {/* Personelle Skills & Rollen-Pills */}
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {person.role === 'LEITUNG' && (
+                              <span title="Einrichtungsleitung" className="inline-flex items-center px-1 py-0.2 rounded bg-indigo-100 text-indigo-700 text-[9px] font-bold">
+                                ⭐ Leitung
+                              </span>
+                            )}
+                            {person.role === 'SPRINGER' && (
+                              <span title="Dedizierte Springerin" className="inline-flex items-center px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold">
+                                🔄 Springer
+                              </span>
+                            )}
+                            {person.skills?.includes('U3_QUALIFIKATION') && (
+                              <span title="U3-Qualifikation" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-purple-100 text-purple-700 text-[9px] font-bold">
+                                <Baby className="w-2.5 h-2.5" />
+                                <span>U3</span>
+                              </span>
+                            )}
+                            {person.skills?.includes('ERSTE_HILFE_KIND') && (
+                              <span title="Ersthelfer am Kind" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-rose-100 text-rose-700 text-[9px] font-bold">
+                                <HeartPulse className="w-2.5 h-2.5" />
+                                <span>EH</span>
+                              </span>
+                            )}
+                            {person.skills?.includes('INKLUSION') && (
+                              <span title="Inklusionsfachkraft" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-amber-100 text-amber-700 text-[9px] font-bold">
+                                <GraduationCap className="w-2.5 h-2.5" />
+                                <span>Inkl</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </th>
+                    </td>
+
+                    {/* Day Shift Cells (Droppable Zones) */}
+                    {weekDays.map((day, dIdx) => {
+                      const dayStr = format(day, 'yyyy-MM-dd');
+                      const dayShifts = shifts.filter(
+                        s => s.staff_id === person.id && s.date === dayStr
+                      );
+                      const dayWish = wishes.find(
+                        w => w.staff_id === person.id && w.date === dayStr
+                      );
+                      const isHoveredDrop = dragOverCell?.staffId === person.id && dragOverCell?.date === dayStr;
+
+                      return (
+                        <td 
+                          key={dIdx} 
+                          className={`p-2 align-top text-center transition-all ${
+                            isHoveredDrop
+                              ? 'bg-emerald-100/80 border-2 border-dashed border-emerald-500 rounded-xl scale-[1.02] shadow-sm'
+                              : ''
+                          }`}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = 'copy';
+                            if (!dragOverCell || dragOverCell.staffId !== person.id || dragOverCell.date !== dayStr) {
+                              setDragOverCell({ staffId: person.id, date: dayStr });
+                            }
+                          }}
+                          onDragLeave={() => {
+                            setDragOverCell(null);
+                          }}
+                          onDrop={(e) => handleCellDrop(e, person.id, dayStr)}
+                        >
+                          {/* If staff member submitted a wish for this day */}
+                          {dayWish && dayShifts.length === 0 && (
+                            <div 
+                              onClick={() => handleOpenNewShift(person.id, dayStr)}
+                              className="mb-1 p-1 bg-amber-50 border border-amber-200 rounded-lg text-left cursor-pointer hover:bg-amber-100 transition-colors"
+                              title={`Mitarbeiter-Wunsch: ${dayWish.note || dayWish.type}`}
+                            >
+                              <div className="flex items-center space-x-1 text-[9px] font-bold text-amber-800">
+                                <Lightbulb className="w-3 h-3 text-amber-600 shrink-0" />
+                                <span>
+                                  {dayWish.type === 'WUNSCH_FRUEH' ? 'Wunsch: Frühdienst' : dayWish.type === 'WUNSCH_SPAET' ? 'Wunsch: Spätdienst' : 'Wunsch: Frei'}
+                                </span>
+                              </div>
+                              {dayWish.note && (
+                                <div className="text-[8px] text-amber-700 truncate mt-0.5">
+                                  {dayWish.note}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {dayShifts.length === 0 ? (
+                            <button
+                              onClick={() => handleOpenNewShift(person.id, dayStr)}
+                              className={`w-full h-14 rounded-xl border border-dashed flex flex-col items-center justify-center transition-all text-xs group ${
+                                isHoveredDrop
+                                  ? 'border-emerald-500 bg-emerald-100/60 text-emerald-800 font-bold'
+                                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-100/50 text-slate-300 hover:text-slate-500'
+                              }`}
+                              title="Schicht planen oder Person hierhin ziehen"
+                            >
+                              {isHoveredDrop ? (
+                                <span className="text-[10px] text-emerald-700">Hier ablegen (+{defaultDurationHours}h)</span>
+                              ) : (
+                                <Plus className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              )}
+                            </button>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {dayShifts.map((sh) => {
+                                const isCancelled = sh.status === 'CANCELLED';
+
+                                return (
+                                  <div
+                                    key={sh.id}
+                                    onClick={() => handleOpenEditShift(sh)}
+                                    className={`rounded-xl p-2 text-left relative group shadow-2xs border transition-all cursor-pointer hover:shadow-md hover:border-emerald-400 ${
+                                      isCancelled
+                                        ? 'bg-rose-50 border-rose-300 line-through opacity-75'
+                                        : sh.warning
+                                          ? 'bg-amber-50/90 border-amber-300 text-slate-900'
+                                          : 'bg-emerald-50/80 border-emerald-200 text-slate-800'
+                                    }`}
+                                    title="Klicken, um Schichtzeit anzupassen"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[11px] font-bold text-slate-900 flex items-center space-x-1">
+                                        <Clock className="w-3 h-3 text-slate-500 shrink-0" />
+                                        <span>{sh.start_time} - {sh.end_time}</span>
+                                      </span>
+                                      <div className="flex items-center space-x-1">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleOpenEditShift(sh);
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-emerald-700 transition-opacity"
+                                          title="Zeit anpassen"
+                                        >
+                                          <Edit3 className="w-3 h-3 text-slate-400 hover:text-emerald-600" />
+                                        </button>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDeleteShift(sh.id);
+                                          }}
+                                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-rose-600 transition-opacity"
+                                          title="Schicht löschen"
+                                        >
+                                          <Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-600" />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center space-x-1 mt-0.5">
+                                      <span className="text-[10px] text-slate-600 truncate font-semibold">
+                                        {sh.group_name.split(' ')[0]}
+                                      </span>
+                                      {sh.group_name.includes('U3') && (
+                                        <span className="text-[8px] bg-purple-100 text-purple-700 px-1 rounded font-bold">
+                                          U3
+                                        </span>
+                                      )}
+                                      <span className="text-[9px] text-slate-400">
+                                        ({calculateNetHours(sh.start_time, sh.end_time, sh.break_minutes)}h)
+                                      </span>
+                                    </div>
+
+                                    {sh.role_override && (
+                                      <span className="text-[9px] bg-indigo-100 text-indigo-700 font-bold px-1 rounded block mt-0.5 no-underline">
+                                        {sh.role_override}
+                                      </span>
+                                    )}
+
+                                    {/* Legal ArbZG Warning Indicator on Shift */}
+                                    {sh.warning && (
+                                      <div 
+                                        className="mt-1 flex items-start space-x-1 p-1 bg-amber-100/90 text-amber-900 border border-amber-300 rounded text-[9px] font-semibold leading-tight"
+                                        title={sh.warning}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          alert(sh.warning);
+                                        }}
+                                      >
+                                        <AlertTriangle className="w-3 h-3 text-amber-700 shrink-0 mt-0.2" />
+                                        <span className="truncate">ArbZG: {sh.warning}</span>
+                                      </div>
+                                    )}
+
+                                    {isCancelled && (
+                                      <span className="text-[9px] text-rose-700 font-bold block no-underline mt-0.5">
+                                        Ausfall (Krank)
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
                 );
               })}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredStaff.map((person) => {
-              const isFachkraft = person.is_fachkraft === 1;
+            </tbody>
+          </table>
+        </div>
 
-              return (
-                <tr key={person.id} className="hover:bg-slate-50/60 transition-colors">
-                  {/* Staff Info Col */}
-                  <td className="p-3 w-56">
-                    <div className="flex items-start space-x-2.5">
+        {/* Right Column: DRAG & DROP MITARBEITER-POOL SIDEBAR */}
+        {sidebarOpen && (
+          <div className="w-full lg:w-80 shrink-0 bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col space-y-3.5 shadow-2xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center space-x-2">
+                <div className="p-1.5 bg-emerald-100 text-emerald-800 rounded-lg">
+                  <GripVertical className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900">Mitarbeiter-Pool</h3>
+                  <span className="text-[10px] text-slate-500">Per Drag & Drop reinziehen</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                title="Sidebar schließen"
+              >
+                <PanelRightClose className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick explanation hint */}
+            <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 space-y-1">
+              <div className="font-bold flex items-center space-x-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                <span>1-Klick Drag & Drop</span>
+              </div>
+              <p className="text-[10px] text-emerald-800 leading-tight">
+                Ziehe eine Person auf einen Wochentag. Schicht wird automatisch mit <strong>{defaultDurationHours} Std.</strong> ({defaultStartTime} - {calculateEndTime(defaultStartTime, defaultDurationHours, defaultBreakMinutes)} Uhr) angelegt.
+              </p>
+            </div>
+
+            {/* Staff Search Filter */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <input
+                type="text"
+                placeholder="Personal suchen (Name, Skills)..."
+                value={staffSearch}
+                onChange={(e) => setStaffSearch(e.target.value)}
+                className="w-full text-xs pl-8 pr-3 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+              />
+              {staffSearch && (
+                <button
+                  onClick={() => setStaffSearch('')}
+                  className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Draggable Staff Cards List */}
+            <div className="space-y-2 max-h-[580px] overflow-y-auto pr-1">
+              {sidebarStaffList.map((person) => {
+                const isFachkraft = person.is_fachkraft === 1;
+                const isDragging = draggedStaff?.id === person.id;
+
+                return (
+                  <div
+                    key={person.id}
+                    draggable={true}
+                    onDragStart={(e) => handleDragStart(e, person)}
+                    onDragEnd={handleDragEnd}
+                    className={`bg-white border rounded-xl p-2.5 flex items-center justify-between cursor-grab active:cursor-grabbing hover:border-emerald-400 hover:shadow-xs transition-all select-none ${
+                      isDragging ? 'opacity-40 border-dashed border-emerald-500 scale-95' : 'border-slate-200'
+                    }`}
+                    title={`Ziehe ${person.name} in den Kalender`}
+                  >
+                    <div className="flex items-center space-x-2.5 min-w-0">
                       <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-xs shrink-0 mt-0.5"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
                         style={{ backgroundColor: person.color }}
                       >
                         {person.avatar}
@@ -351,157 +949,382 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                         <div className="text-xs font-bold text-slate-900 truncate">
                           {person.name}
                         </div>
-                        <div className="flex items-center space-x-1 text-[10px] text-slate-400 mt-0.5">
-                          <span className={isFachkraft ? 'text-blue-600 font-semibold' : 'text-slate-500'}>
-                            {person.role === 'LEITUNG' ? 'Leitung' : isFachkraft ? 'Fachkraft' : 'Ergänzungskraft'}
-                          </span>
+                        <div className="flex items-center space-x-1 text-[10px] text-slate-500">
+                          <span>{person.role === 'LEITUNG' ? 'Leitung' : isFachkraft ? 'Fachkraft' : 'Ergänzung'}</span>
                           <span>•</span>
                           <span>{person.weekly_hours}h</span>
                         </div>
-
-                        {/* Personelle Skills & Rollen-Pills */}
-                        <div className="flex flex-wrap items-center gap-1 mt-1">
-                          {person.role === 'LEITUNG' && (
-                            <span title="Einrichtungsleitung (kann im Notfall einspringen)" className="inline-flex items-center px-1 py-0.2 rounded bg-indigo-100 text-indigo-700 text-[9px] font-bold">
-                              ⭐ Leitung
-                            </span>
-                          )}
-                          {person.role === 'SPRINGER' && (
-                            <span title="Dedizierte Springerin" className="inline-flex items-center px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold">
-                              🔄 Springer
-                            </span>
-                          )}
+                        {/* Skills */}
+                        <div className="flex flex-wrap gap-1 mt-0.5">
                           {person.skills?.includes('U3_QUALIFIKATION') && (
-                            <span title="U3-Qualifikation" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-purple-100 text-purple-700 text-[9px] font-bold">
-                              <Baby className="w-2.5 h-2.5" />
-                              <span>U3</span>
-                            </span>
+                            <span className="text-[8px] bg-purple-100 text-purple-700 px-1 rounded font-bold">U3</span>
                           )}
                           {person.skills?.includes('ERSTE_HILFE_KIND') && (
-                            <span title="Ersthelfer am Kind" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-rose-100 text-rose-700 text-[9px] font-bold">
-                              <HeartPulse className="w-2.5 h-2.5" />
-                              <span>EH</span>
-                            </span>
+                            <span className="text-[8px] bg-rose-100 text-rose-700 px-1 rounded font-bold">EH</span>
                           )}
-                          {person.skills?.includes('INKLUSION') && (
-                            <span title="Inklusionsfachkraft" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-amber-100 text-amber-700 text-[9px] font-bold">
-                              <GraduationCap className="w-2.5 h-2.5" />
-                              <span>Inkl</span>
-                            </span>
-                          )}
-                          {person.can_spring === 1 && person.role !== 'SPRINGER' && person.role !== 'LEITUNG' && (
-                            <span title="Kann flexibel einspringen" className="inline-flex items-center px-1 py-0.2 rounded bg-teal-100 text-teal-700 text-[9px] font-semibold">
-                              Springer-Aktiv
-                            </span>
+                          {person.role === 'SPRINGER' && (
+                            <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 rounded font-bold">Springer</span>
                           )}
                         </div>
                       </div>
                     </div>
-                  </td>
 
-                  {/* Day Shift Cells */}
-                  {weekDays.map((day, dIdx) => {
-                    const dayStr = format(day, 'yyyy-MM-dd');
-                    const dayShifts = shifts.filter(
-                      s => s.staff_id === person.id && s.date === dayStr
-                    );
-                    const dayWish = wishes.find(
-                      w => w.staff_id === person.id && w.date === dayStr
-                    );
+                    <div className="flex items-center text-slate-300 hover:text-slate-600 pl-2">
+                      <GripVertical className="w-4 h-4 shrink-0" />
+                    </div>
+                  </div>
+                );
+              })}
 
-                    return (
-                      <td key={dIdx} className="p-2 align-top text-center">
-                        {/* If staff member submitted a wish for this day */}
-                        {dayWish && dayShifts.length === 0 && (
-                          <div 
-                            onClick={() => handleOpenNewShift(person.id, dayStr)}
-                            className="mb-1 p-1 bg-amber-50 border border-amber-200 rounded-lg text-left cursor-pointer hover:bg-amber-100 transition-colors"
-                            title={`Mitarbeiter-Wunsch: ${dayWish.note || dayWish.type}`}
-                          >
-                            <div className="flex items-center space-x-1 text-[9px] font-bold text-amber-800">
-                              <Lightbulb className="w-3 h-3 text-amber-600 shrink-0" />
-                              <span>
-                                {dayWish.type === 'WUNSCH_FRUEH' ? 'Wunsch: Frühdienst' : dayWish.type === 'WUNSCH_SPAET' ? 'Wunsch: Spätdienst' : 'Wunsch: Frei'}
-                              </span>
-                            </div>
-                            {dayWish.note && (
-                              <div className="text-[8px] text-amber-700 truncate mt-0.5">
-                                {dayWish.note}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {dayShifts.length === 0 ? (
-                          <button
-                            onClick={() => handleOpenNewShift(person.id, dayStr)}
-                            className="w-full h-12 rounded-lg border border-dashed border-slate-200 hover:border-slate-300 hover:bg-slate-100/50 flex items-center justify-center text-slate-300 hover:text-slate-500 transition-all text-xs group"
-                            title="Schicht für diesen Tag planen"
-                          >
-                            <Plus className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </button>
-                        ) : (
-                          <div className="space-y-1">
-                            {dayShifts.map((sh) => {
-                              const isCancelled = sh.status === 'CANCELLED';
-
-                              return (
-                                <div
-                                  key={sh.id}
-                                  className={`rounded-lg p-2 text-left relative group shadow-2xs border transition-all ${
-                                    isCancelled
-                                      ? 'bg-rose-50 border-rose-300 line-through opacity-75'
-                                      : 'bg-emerald-50/80 border-emerald-200 text-slate-800'
-                                  }`}
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[11px] font-bold text-slate-900">
-                                      {sh.start_time} - {sh.end_time}
-                                    </span>
-                                    <button
-                                      onClick={() => onDeleteShift(sh.id)}
-                                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-rose-600 transition-opacity"
-                                      title="Schicht löschen"
-                                    >
-                                      <Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-600" />
-                                    </button>
-                                  </div>
-                                  <div className="flex items-center space-x-1 mt-0.5">
-                                    <span className="text-[10px] text-slate-600 truncate font-medium">
-                                      {sh.group_name.split(' ')[0]}
-                                    </span>
-                                    {sh.group_name.includes('U3') && (
-                                      <span className="text-[8px] bg-purple-100 text-purple-700 px-1 rounded font-bold">
-                                        U3
-                                      </span>
-                                    )}
-                                  </div>
-                                  {sh.role_override && (
-                                    <span className="text-[9px] bg-indigo-100 text-indigo-700 font-bold px-1 rounded block mt-0.5 no-underline">
-                                      {sh.role_override}
-                                    </span>
-                                  )}
-                                  {isCancelled && (
-                                    <span className="text-[9px] text-rose-700 font-bold block no-underline mt-0.5">
-                                      Ausfall (Krank)
-                                    </span>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              {sidebarStaffList.length === 0 && (
+                <div className="p-4 text-center text-xs text-slate-400 italic">
+                  Keine Mitarbeiter gefunden.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Modal for adding a shift with 1-Click Templates & Wish recognition */}
+      {/* MODAL: EINSTELLUNGEN FÜR STANDARDSCHICHT (Standardarbeitszeit & ArbZG) */}
+      {settingsModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 my-6 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center space-x-2">
+                <Sliders className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-bold text-slate-900">Dienstplan-Einstellungen</h3>
+              </div>
+              <button onClick={() => setSettingsModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSettings} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>Standard-Schichtdauer (Stunden)</span>
+                  <span className="text-emerald-700 font-extrabold">{defaultDurationHours} Std.</span>
+                </label>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  Dauer einer per Drag & Drop in den Kalender gezogenen Schicht (z.B. standardmäßig 8 Stunden).
+                </p>
+                <div className="flex items-center space-x-2">
+                  {[6.0, 7.0, 7.5, 8.0, 8.5].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setDefaultDurationHours(preset)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                        defaultDurationHours === preset
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {preset}h
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center space-x-2">
+                  <input
+                    type="number"
+                    step="0.5"
+                    min="1"
+                    max="12"
+                    value={defaultDurationHours}
+                    onChange={(e) => setDefaultDurationHours(Number(e.target.value))}
+                    className="w-28 text-xs p-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                  />
+                  <span className="text-xs text-slate-500">Stunden Nettoarbeitszeit</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Standard-Schichtbeginn</label>
+                  <input
+                    type="time"
+                    value={defaultStartTime}
+                    onChange={(e) => setDefaultStartTime(e.target.value)}
+                    className="w-full text-xs p-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Standard-Pause (Min.)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="15"
+                    value={defaultBreakMinutes}
+                    onChange={(e) => setDefaultBreakMinutes(Number(e.target.value))}
+                    className="w-full text-xs p-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Calculated preview */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+                <span className="font-bold text-slate-800">Ergebnis bei Drag & Drop:</span>
+                <div className="text-slate-600">
+                  {defaultStartTime} Uhr bis <strong>{calculateEndTime(defaultStartTime, defaultDurationHours, defaultBreakMinutes)} Uhr</strong> ({defaultDurationHours}h Arbeit + {defaultBreakMinutes}m Pause)
+                </div>
+              </div>
+
+              {/* Legal ArbZG compliance info */}
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 space-y-1">
+                <div className="font-bold flex items-center space-x-1.5">
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  <span>Automatische Prüfung des rechtlichen Rahmens</span>
+                </div>
+                <p className="text-[11px] text-blue-800 leading-relaxed">
+                  Das System prüft ArbZG § 3 (max. 10h Arbeitszeit), ArbZG § 5 (mind. 11h Ruhezeit zum Vor-/Folgetag) und bestehende Abwesenheiten. Eventuelle Fehler/Warnungen werden prominent gemeldet, verhindern das Eintragen jedoch nicht.
+                </p>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSettingsModalOpen(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs"
+                >
+                  {savingSettings ? 'Speichere...' : 'Einstellungen speichern'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SCHICHTZEIT ANPASSEN (Zeit im Kalender direkt anpassen) */}
+      {editModalOpen && editingShift && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 my-6 animate-scale-up">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center space-x-2.5">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
+                  style={{ backgroundColor: editingShift.staff_color }}
+                >
+                  {editingShift.staff_name.split(' ').map(n => n[0]).join('')}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Schichtzeit anpassen</h3>
+                  <p className="text-xs text-slate-500">
+                    {editingShift.staff_name} • {format(new Date(editingShift.date), 'EEEE, dd.MM.yyyy', { locale: de })}
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setEditModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Existing ArbZG Warning on this shift */}
+            {editingShift.warning && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start space-x-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Erfasster ArbZG-Hinweis:</span>
+                  <p className="text-amber-900 mt-0.5">{editingShift.warning}</p>
+                </div>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditShift} className="space-y-4">
+              {/* Quick Preset Buttons */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">Schnellauswahl Schichtzeiten</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditFormData({ ...editFormData, start_time: '07:00', end_time: '15:30', break_minutes: 30, role_override: 'Frühdienst' })}
+                    className="p-2 border border-slate-200 hover:border-emerald-500 rounded-xl text-left bg-slate-50 hover:bg-emerald-50/50 transition-all text-xs"
+                  >
+                    <div className="font-bold text-slate-800">Frühdienst</div>
+                    <div className="text-[10px] text-slate-500">07:00 - 15:30</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditFormData({ ...editFormData, start_time: '08:00', end_time: '16:30', break_minutes: 30, role_override: 'Regeldienst' })}
+                    className="p-2 border border-slate-200 hover:border-emerald-500 rounded-xl text-left bg-slate-50 hover:bg-emerald-50/50 transition-all text-xs"
+                  >
+                    <div className="font-bold text-slate-800">Regeldienst</div>
+                    <div className="text-[10px] text-slate-500">08:00 - 16:30</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditFormData({ ...editFormData, start_time: '08:30', end_time: '17:00', break_minutes: 30, role_override: 'Spätdienst' })}
+                    className="p-2 border border-slate-200 hover:border-emerald-500 rounded-xl text-left bg-slate-50 hover:bg-emerald-50/50 transition-all text-xs"
+                  >
+                    <div className="font-bold text-slate-800">Spätdienst</div>
+                    <div className="text-[10px] text-slate-500">08:30 - 17:00</div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Start & End time with +/- 30m quick controls */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700">Beginn</label>
+                  <div className="flex items-center space-x-1">
+                    <input
+                      type="time"
+                      value={editFormData.start_time}
+                      onChange={(e) => setEditFormData({ ...editFormData, start_time: e.target.value })}
+                      className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                    />
+                  </div>
+                  <div className="flex space-x-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => adjustEditTime('start', -30)}
+                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                    >
+                      -30m
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustEditTime('start', 30)}
+                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                    >
+                      +30m
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-slate-700">Ende</label>
+                  <div className="flex items-center space-x-1">
+                    <input
+                      type="time"
+                      value={editFormData.end_time}
+                      onChange={(e) => setEditFormData({ ...editFormData, end_time: e.target.value })}
+                      className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold"
+                    />
+                  </div>
+                  <div className="flex space-x-1 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => adjustEditTime('end', -30)}
+                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                    >
+                      -30m
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => adjustEditTime('end', 30)}
+                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                    >
+                      +30m
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pause & Group */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Pause</label>
+                  <select
+                    value={editFormData.break_minutes}
+                    onChange={(e) => setEditFormData({ ...editFormData, break_minutes: Number(e.target.value) })}
+                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-medium"
+                  >
+                    <option value={0}>0 Minuten (Kurzschicht)</option>
+                    <option value={15}>15 Minuten</option>
+                    <option value={30}>30 Minuten (Standard)</option>
+                    <option value={45}>45 Minuten</option>
+                    <option value={60}>60 Minuten</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Gruppe</label>
+                  <select
+                    value={editFormData.group_id}
+                    onChange={(e) => setEditFormData({ ...editFormData, group_id: e.target.value })}
+                    className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-medium"
+                  >
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Net hours calculation & Live ArbZG check */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs flex items-center justify-between">
+                <div>
+                  <span className="text-slate-500">Nettoarbeitszeit: </span>
+                  <span className="font-extrabold text-slate-900 text-sm">
+                    {calculateNetHours(editFormData.start_time, editFormData.end_time, editFormData.break_minutes)} Std.
+                  </span>
+                </div>
+                {calculateNetHours(editFormData.start_time, editFormData.end_time, editFormData.break_minutes) > 10.0 && (
+                  <span className="text-amber-800 font-bold flex items-center space-x-1">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                    <span>&gt; 10h (ArbZG § 3 Hinweis)</span>
+                  </span>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Besondere Funktion / Schichtrolle (optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="z.B. Springer, Frühdienst, Vorbereitung..."
+                  value={editFormData.role_override}
+                  onChange={(e) => setEditFormData({ ...editFormData, role_override: e.target.value })}
+                  className="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm('Schicht wirklich löschen?')) {
+                      onDeleteShift(editingShift.id);
+                      setEditModalOpen(false);
+                    }
+                  }}
+                  className="px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors flex items-center space-x-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Schicht löschen</span>
+                </button>
+                <div className="flex space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl"
+                  >
+                    Abbrechen
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs"
+                  >
+                    Zeit anpassen & Speichern
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SCHICHT MANUELL EINTRAGEN */}
       {modalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 my-6">
@@ -528,7 +1351,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               </div>
             )}
 
-            {/* 1-Click Shift Templates (Competitor standout feature) */}
+            {/* 1-Click Shift Templates */}
             <div className="mb-4">
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center space-x-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
@@ -648,7 +1471,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               {/* ArbZG Hint */}
               <div className="bg-blue-50 text-blue-800 p-2.5 rounded-xl text-[11px] flex items-center space-x-1.5">
                 <Clock className="w-4 h-4 shrink-0 text-blue-600" />
-                <span>Gesetzliche Ruhezeit von 11 Stunden wird vor dem Speichern automatisch geprüft.</span>
+                <span>Gesetzlicher Rahmen (ArbZG § 3, § 4, § 5) wird beim Speichern automatisch geprüft.</span>
               </div>
 
               <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
@@ -671,7 +1494,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         </div>
       )}
 
-      {/* PRINT & PDF AUSHANG MODAL (Competitor Best Practice) */}
+      {/* PRINT & PDF AUSHANG MODAL */}
       {printOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 my-6">

@@ -53,8 +53,29 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
     annual_vacation_days: 30,
     target_group_id: groups[0]?.id || '',
     pin: '1234',
-    color: '#10b981'
+    color: '#10b981',
+    standard_work_hours: '08:00 - 16:30',
+    availability_window: 'Mo-Fr 07:30 - 17:00',
+    username: 'admin',
+    password: 'admin'
   });
+
+  const handleResetPassword = async (staffId: string, name: string) => {
+    if (!confirm(`Passwort für ${name} wirklich auf den Standard "admin" zurücksetzen?`)) return;
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staff_id: staffId })
+      });
+      if (res.ok) {
+        alert(`✓ Login für ${name} lautet wieder standardmäßig: admin / admin`);
+        onRefresh();
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
 
   // Audit history modal
   const [auditStaff, setAuditStaff] = useState<Staff | null>(null);
@@ -86,7 +107,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
       annual_vacation_days: 30,
       target_group_id: groups[0]?.id || '',
       pin: '1234',
-      color: '#10b981'
+      color: '#10b981',
+      standard_work_hours: '08:00 - 16:30',
+      availability_window: 'Mo-Fr 07:30 - 17:00',
+      username: 'admin',
+      password: 'admin'
     });
     setModalOpen(true);
   };
@@ -105,7 +130,11 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
       annual_vacation_days: staff.annual_vacation_days || 30,
       target_group_id: staff.target_group_id || '',
       pin: staff.pin,
-      color: staff.color
+      color: staff.color,
+      standard_work_hours: staff.standard_work_hours || '08:00 - 16:30',
+      availability_window: staff.availability_window || 'Mo-Fr 07:30 - 17:00',
+      username: staff.username || 'admin',
+      password: staff.password || 'admin'
     });
     setModalOpen(true);
   };
@@ -330,6 +359,17 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                     <span className="text-slate-300">•</span>
                     <span className="truncate">{groupName.split(' ')[0]}</span>
                   </div>
+
+                  {s.standard_work_hours && (
+                    <div className="text-[10px] text-slate-600 bg-slate-100/80 px-2 py-0.5 rounded font-medium">
+                      <span className="font-bold text-slate-700">Regulär: </span>{s.standard_work_hours}
+                    </div>
+                  )}
+                  {s.availability_window && (
+                    <div className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded font-medium">
+                      <span className="font-bold text-indigo-900">Rahmen: </span>{s.availability_window}
+                    </div>
+                  )}
                 </div>
 
                 {/* Qualifikationen & Ablaufdaten Section */}
@@ -387,6 +427,22 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                       ))}
                     </div>
                   )}
+                </div>
+
+                {/* Login Credentials Status */}
+                <div className="mt-2.5 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                  <div className="flex items-center space-x-1 text-slate-600">
+                    <Key className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span>Login: <strong className="font-mono text-slate-800">{s.username || 'admin'}</strong> / <strong className="font-mono text-slate-800">{s.password_changed ? '••••••' : (s.password || 'admin')}</strong></span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleResetPassword(s.id, s.name)}
+                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold hover:underline"
+                    title="Setzt das Passwort auf 'admin' zurück"
+                  >
+                    Reset auf 'admin'
+                  </button>
                 </div>
               </div>
 
@@ -546,7 +602,7 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Kiosk / Stempel-PIN</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Mitarbeiter-PIN</label>
                   <input
                     type="text"
                     maxLength={4}
@@ -554,6 +610,76 @@ export const StaffManagement: React.FC<StaffManagementProps> = ({
                     onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
                     className="w-full text-xs p-2.5 border border-slate-300 rounded-xl font-mono text-center tracking-widest"
                   />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Standard-Arbeitszeit (kann, muss nicht)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.standard_work_hours}
+                    onChange={(e) => setFormData({ ...formData, standard_work_hours: e.target.value })}
+                    placeholder="z.B. Mo-Fr 08:00 - 16:30"
+                    className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Reguläre Schichtzeit</span>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Verfügbarkeitsrahmen (Zeitlicher Rahmen)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.availability_window}
+                    onChange={(e) => setFormData({ ...formData, availability_window: e.target.value })}
+                    placeholder="z.B. Mo-Fr 07:30 - 17:00 / Mi ab 12h"
+                    className="w-full text-xs p-2 bg-white border border-slate-300 rounded-lg"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-0.5 block">Rahmen, in dem gearbeitet werden kann</span>
+                </div>
+              </div>
+
+              {/* Standard-Login Info: admin / admin */}
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-xl p-3.5 flex items-start space-x-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0 mt-0.5">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-bold text-emerald-950">Standard-Login für diesen Account:</span>
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-200 text-emerald-900 font-mono">
+                      admin / admin
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 mt-0.5">
+                    Accounts werden standardmäßig mit dem Login <strong>admin / admin</strong> eingerichtet. Mitarbeiter können ihr Passwort nach der ersten Anmeldung anpassen.
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-emerald-200/60 text-xs">
+                    <div>
+                      <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">Benutzername (Login):</label>
+                      <input
+                        type="text"
+                        value={formData.username || 'admin'}
+                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                        className="w-full text-xs p-1.5 bg-white border border-emerald-300 rounded-lg font-mono text-slate-800"
+                        placeholder="admin"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">Initial-Passwort:</label>
+                      <input
+                        type="text"
+                        value={formData.password || 'admin'}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        className="w-full text-xs p-1.5 bg-white border border-emerald-300 rounded-lg font-mono text-slate-800"
+                        placeholder="admin"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 

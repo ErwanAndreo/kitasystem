@@ -216,15 +216,279 @@ class ApiService {
     return _mockClosures();
   }
 
+  // --- CHECKLISTEN & QUALITÄTSSTANDARDS ---
+  static Future<List<ChecklistModel>> getChecklists({String? staffId}) async {
+    try {
+      String url = '$baseUrl/checklists';
+      if (staffId != null) url += '?staff_id=$staffId';
+      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        return data.map((e) => ChecklistModel.fromJson(e)).toList();
+      }
+    } catch (_) {}
+    return _mockChecklists(staffId);
+  }
+
+  static Future<bool> toggleChecklistItem({
+    required String checklistId,
+    required String itemId,
+    required String completedBy,
+  }) async {
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/checklists/$checklistId/toggle-item'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'item_id': itemId,
+          'completed_by': completedBy,
+        }),
+      ).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<bool> updateChecklist(String id, {bool? isShared, String? title, String? category}) async {
+    try {
+      final Map<String, dynamic> map = {};
+      if (isShared != null) map['is_shared'] = isShared;
+      if (title != null) map['title'] = title;
+      if (category != null) map['category'] = category;
+
+      final res = await http.put(
+        Uri.parse('$baseUrl/checklists/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(map),
+      ).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<bool> addChecklistItem(String checklistId, String text) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/checklists/$checklistId/items'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'text': text}),
+      ).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<List<ShareFavoriteModel>> getShareFavorites(String staffId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/staff/$staffId/share-favorites')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(res.body);
+        return data.map((e) => ShareFavoriteModel.fromJson(e)).toList();
+      }
+    } catch (_) {}
+    return [
+      ShareFavoriteModel(id: 'fav_gesamt', type: 'GESAMT', label: 'Gesamt (Alle)'),
+      ShareFavoriteModel(id: 'fav_today_group', type: 'TODAY_GROUP', label: 'Heutige Gruppe'),
+      ShareFavoriteModel(id: 'fav_leitung', type: 'LEITUNG', label: 'Leitung'),
+    ];
+  }
+
+  static Future<List<ShareFavoriteModel>?> pinShareFavorite(String staffId, Map<String, dynamic> favorite) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/staff/$staffId/share-favorites'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'favorite': favorite}),
+      ).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['favorites'] is List) {
+          final List list = data['favorites'];
+          return list.map((e) => ShareFavoriteModel.fromJson(e)).toList();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<bool> createChecklist({
+    required String title,
+    required String category,
+    required String createdById,
+    required String createdByName,
+    required bool isShared,
+    String shareScope = 'ALL',
+    String? sharedGroupId,
+    String? sharedGroupName,
+    List<String>? sharedStaffIds,
+    List<String>? sharedStaffNames,
+    required String color,
+    required List<String> items,
+  }) async {
+    try {
+      final itemObjects = items.map((t) => {
+        'id': 'i_${DateTime.now().millisecondsSinceEpoch}_${t.hashCode.abs()}',
+        'text': t,
+        'done': false,
+      }).toList();
+
+      final res = await http.post(
+        Uri.parse('$baseUrl/checklists'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'title': title,
+          'category': category,
+          'created_by_id': createdById,
+          'created_by_name': createdByName,
+          'is_shared': isShared,
+          'share_scope': shareScope,
+          'shared_group_id': sharedGroupId,
+          'shared_group_name': sharedGroupName,
+          'shared_staff_ids': sharedStaffIds ?? [],
+          'shared_staff_names': sharedStaffNames ?? [],
+          'color': color,
+          'items': itemObjects,
+        }),
+      ).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200 || res.statusCode == 201;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<bool> deleteChecklist(String checklistId) async {
+    try {
+      final res = await http.delete(Uri.parse('$baseUrl/checklists/$checklistId')).timeout(const Duration(seconds: 3));
+      return res.statusCode == 200;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // --- AUTHENTICATION & LOGIN (admin / admin) ---
+  static Future<Map<String, dynamic>?> login(String username, String password) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'username': username, 'password': password}),
+      ).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<bool> resetPassword(String staffId) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/reset-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'staff_id': staffId}),
+      ).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
+  }
+
+  static Future<bool> changePassword(String staffId, String? oldPassword, String newPassword) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/change-password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'staff_id': staffId,
+          'old_password': oldPassword,
+          'new_password': newPassword,
+        }),
+      ).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
+  }
+
+  // --- EINSPRING-KASKADE & NOTFALL-VERTRETUNG ---
+  static Future<Map<String, dynamic>?> getPendingEmergencyRequest(String staffId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/emergency/pending-request/$staffId')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['has_pending_request'] == true) {
+          return data;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<bool> respondToEmergencyCycle(String cycleId, String staffId, String decision) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/emergency/cycles/$cycleId/respond'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'staff_id': staffId,
+          'decision': decision,
+        }),
+      ).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
+  }
+
+  static Future<bool> submitSickNotice(String staffId, String reason) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/requests/sick'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'staff_id': staffId,
+          'reason': reason,
+        }),
+      ).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
+  }
+
+  static Future<String> getNotificationSettings(String staffId) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/staff/$staffId/notification-settings')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return data['critical_alerts_mode'] ?? 'CRITICAL';
+      }
+    } catch (_) {}
+    return 'CRITICAL';
+  }
+
+  static Future<bool> updateNotificationSettings(String staffId, String criticalAlertsMode) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/staff/$staffId/notification-settings'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'critical_alerts_mode': criticalAlertsMode,
+        }),
+      ).timeout(const Duration(seconds: 4));
+      return res.statusCode == 200;
+    } catch (_) {}
+    return false;
+  }
+
   // --- MOCK FALLBACK DATA ---
   static List<StaffModel> _mockStaff() {
     return [
-      StaffModel(id: 's_sabine', name: 'Sabine Weber (Leitung)', email: 'leitung@kita.de', phone: '0171-112233', role: 'LEITUNG', qualification: 'Sozialpädagogin', isFachkraft: true, weeklyHours: 39, pin: '1111', avatar: 'SW', color: '#4f46e5'),
-      StaffModel(id: 's_lukas', name: 'Lukas Wagner', email: 'l.wagner@kita.de', phone: '0176-667788', role: 'FACHKRAFT', qualification: 'Staatl. anerkannter Erzieher', isFachkraft: true, weeklyHours: 39, targetGroupId: 'g_ue3_sonne', pin: '6666', avatar: 'LW', color: '#84cc16'),
-      StaffModel(id: 's_sarah', name: 'Sarah Klein', email: 's.klein@kita.de', phone: '0172-223344', role: 'FACHKRAFT', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 39, targetGroupId: 'g_u3_maeuse', pin: '2222', avatar: 'SK', color: '#ec4899'),
-      StaffModel(id: 's_anna', name: 'Anna Schmidt', email: 'a.schmidt@kita.de', phone: '0175-556677', role: 'FACHKRAFT', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 35, targetGroupId: 'g_ue3_sonne', pin: '5555', avatar: 'AS', color: '#eab308'),
-      StaffModel(id: 's_elena', name: 'Elena Rossi', email: 'e.rossi@kita.de', phone: '0177-778899', role: 'FACHKRAFT', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 32, targetGroupId: 'g_ue3_wald', pin: '7777', avatar: 'ER', color: '#10b981'),
-      StaffModel(id: 's_julia', name: 'Julia Fischer (Springerin)', email: 'j.fischer@kita.de', phone: '0179-990011', role: 'SPRINGER', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 20, pin: '9999', avatar: 'JF', color: '#8b5cf6'),
+      StaffModel(id: 's_sabine', name: 'Sabine Weber (Leitung)', email: 'leitung@kita.de', phone: '0171-112233', role: 'LEITUNG', qualification: 'Sozialpädagogin', isFachkraft: true, weeklyHours: 39, pin: '1111', avatar: 'SW', color: '#4f46e5', username: 'admin', password: 'admin', passwordChanged: false),
+      StaffModel(id: 's_lukas', name: 'Lukas Wagner (Mitarbeiter 1)', email: 'l.wagner@kita.de', phone: '0176-667788', role: 'FACHKRAFT', qualification: 'Staatl. anerkannter Erzieher', isFachkraft: true, weeklyHours: 39, targetGroupId: 'g_ue3_sonne', pin: '6666', avatar: 'LW', color: '#84cc16', username: 'admin', password: 'admin', passwordChanged: false),
+      StaffModel(id: 's_sarah', name: 'Sarah Klein (Mitarbeiter 2)', email: 's.klein@kita.de', phone: '0172-223344', role: 'FACHKRAFT', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 39, targetGroupId: 'g_u3_maeuse', pin: '2222', avatar: 'SK', color: '#ec4899', username: 'admin', password: 'admin', passwordChanged: false),
+      StaffModel(id: 's_anna', name: 'Anna Schmidt', email: 'a.schmidt@kita.de', phone: '0175-556677', role: 'FACHKRAFT', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 35, targetGroupId: 'g_ue3_sonne', pin: '5555', avatar: 'AS', color: '#eab308', username: 'admin', password: 'admin', passwordChanged: false),
+      StaffModel(id: 's_elena', name: 'Elena Rossi', email: 'e.rossi@kita.de', phone: '0177-778899', role: 'FACHKRAFT', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 32, targetGroupId: 'g_ue3_wald', pin: '7777', avatar: 'ER', color: '#10b981', username: 'admin', password: 'admin', passwordChanged: false),
+      StaffModel(id: 's_julia', name: 'Julia Fischer (Springerin)', email: 'j.fischer@kita.de', phone: '0179-990011', role: 'SPRINGER', qualification: 'Staatl. anerkannte Erzieherin', isFachkraft: true, weeklyHours: 20, pin: '9999', avatar: 'JF', color: '#8b5cf6', username: 'admin', password: 'admin', passwordChanged: false),
     ];
   }
 
@@ -355,6 +619,48 @@ class ApiService {
         date: '2026-10-30',
         type: 'BRUECKENTAG',
         notes: 'Einrichtung geschlossen.',
+      ),
+    ];
+  }
+
+  static List<ChecklistModel> _mockChecklists(String? staffId) {
+    return [
+      ChecklistModel(
+        id: 'chk_mock_1',
+        title: 'Schließdienst & Sicherheitsrundgang Kita Sonnenschein',
+        category: 'SICHERHEIT',
+        createdById: 's_sabine',
+        createdByName: 'Sabine Weber (Leitung)',
+        isShared: true,
+        color: '#ef4444',
+        items: [
+          ChecklistItemModel(id: 'i1', text: 'Fenster in allen Gruppenräumen schließen und verriegeln', done: true, completedBy: 'Lukas Wagner', completedAt: '17:35'),
+          ChecklistItemModel(id: 'i2', text: 'Terrassentüren zum Garten abschließen', done: true, completedBy: 'Lukas Wagner', completedAt: '17:38'),
+          ChecklistItemModel(id: 'i3', text: 'Alarmanlage am Haupteingang scharfstellen', done: false),
+        ],
+        totalItems: 3,
+        completedItems: 2,
+        progressPercent: 67,
+        createdAt: '2026-10-22',
+        updatedAt: '2026-10-22',
+      ),
+      ChecklistModel(
+        id: 'chk_mock_2',
+        title: 'Morgenroutine & Ankommensvorbereitung',
+        category: 'ROUTINE',
+        createdById: 's_sabine',
+        createdByName: 'Sabine Weber (Leitung)',
+        isShared: true,
+        color: '#3b82f6',
+        items: [
+          ChecklistItemModel(id: 'i4', text: 'Haupteingang aufschließen und Stoßlüften', done: true, completedBy: 'Sarah Klein', completedAt: '07:15'),
+          ChecklistItemModel(id: 'i5', text: 'Teewasser kochen & frisches Obst anrichten', done: true, completedBy: 'Sarah Klein', completedAt: '07:25'),
+        ],
+        totalItems: 2,
+        completedItems: 2,
+        progressPercent: 100,
+        createdAt: '2026-10-22',
+        updatedAt: '2026-10-22',
       ),
     ];
   }
