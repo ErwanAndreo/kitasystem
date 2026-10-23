@@ -26,7 +26,9 @@ import {
   UserCheck,
   Building2,
   Lock,
-  ArrowRight
+  ArrowRight,
+  Image as ImageIcon,
+  Receipt
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -38,7 +40,7 @@ interface ParentPortalViewProps {
 export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ showToast }) => {
   // Can switch between demo parents: Anna Bergmann (Vorstand) and Michael Bauer (Eltern)
   const [currentParentId, setCurrentParentId] = useState<string>('p_anna_bergmann');
-  const [activeTab, setActiveTab] = useState<'HOME' | 'DUTIES' | 'DOCS' | 'POLLS' | 'NOTICES' | 'CHILD_PROFILE'>('HOME');
+  const [activeTab, setActiveTab] = useState<'HOME' | 'DUTIES' | 'DOCS' | 'POLLS' | 'CONFERENCES' | 'PHOTOS' | 'BILLING' | 'NOTICES' | 'CHILD_PROFILE'>('HOME');
   const [overview, setOverview] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedChildIndex, setSelectedChildIndex] = useState(0);
@@ -213,6 +215,42 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ showToast })
     }
   };
 
+  // Conference Booking Handlers
+  const handleBookConference = async (confId: string) => {
+    if (!activeChild) return;
+    try {
+      const res = await fetch(`/api/conferences/${confId}/book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parent_id: currentParentId, child_id: activeChild.id })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast('✓ Entwicklungsgespräch erfolgreich reserviert!');
+        await loadParentData();
+      } else {
+        alert(data.error);
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
+  const handleCancelConference = async (confId: string) => {
+    try {
+      const res = await fetch(`/api/conferences/${confId}/cancel`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        showToast('✓ Termin freigegeben.');
+        await loadParentData();
+      } else {
+        alert(data.error);
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   if (loading && !overview) {
     return (
       <div className="flex items-center justify-center py-20 text-slate-400 text-sm">
@@ -371,6 +409,42 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ showToast })
         </button>
 
         <button
+          onClick={() => setActiveTab('CONFERENCES')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'CONFERENCES'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Entwicklungsgespräche</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('PHOTOS')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'PHOTOS'
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" />
+          <span>Foto-Galerie</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('BILLING')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'BILLING'
+              ? 'bg-emerald-600 text-white shadow-xs'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Gebühren & Rechnungen</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('NOTICES')}
           className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
             activeTab === 'NOTICES'
@@ -481,7 +555,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ showToast })
                 <FileText className="w-4 h-4 text-amber-600" />
               </div>
               <div className="text-lg font-black text-slate-900">
-                {activeChild.contract_weekly_hours} Stunden
+                {activeChild.care_hours || activeChild.contract_weekly_hours || 35} Stunden
               </div>
               <p className="text-xs text-slate-500 mt-1">
                 {activeChild.booking_model || 'Regelplatz'} • {activeChild.group_name}
@@ -954,6 +1028,180 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ showToast })
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: ENTWICKLUNGSGESPRÄCHE (Modul C) */}
+      {activeTab === 'CONFERENCES' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">Entwicklungsgespräche & Elternsprechtag</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  1-Klick Slot-Buchung für das jährliche individuelle Entwicklungsgespräch mit den Bezugserzieher:innen.
+                </p>
+              </div>
+              <Calendar className="w-5 h-5 text-blue-600" />
+            </div>
+
+            <div className="space-y-3">
+              {overview?.conferences?.length > 0 ? (
+                overview.conferences.map((conf: any) => {
+                  const isBookedByMe = conf.booked_by_parent_id === currentParentId;
+                  const isAvailable = conf.status === 'AVAILABLE';
+                  return (
+                    <div
+                      key={conf.id}
+                      className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                        isBookedByMe ? 'bg-blue-50/70 border-blue-300' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-slate-900 text-sm">{conf.title}</span>
+                          {isBookedByMe && (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">
+                              ✓ Dein Termin
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 mt-0.5">{conf.notes}</p>
+                        <div className="flex items-center space-x-3 text-[11px] text-slate-400 mt-2">
+                          <span className="font-semibold text-slate-700">Datum: {conf.date}</span>
+                          <span>Zeit: {conf.time_start} - {conf.time_end} Uhr</span>
+                          <span>Ort: {conf.room}</span>
+                          <span>Erzieher: {conf.staff_name}</span>
+                        </div>
+                      </div>
+
+                      {isBookedByMe ? (
+                        <button
+                          onClick={() => handleCancelConference(conf.id)}
+                          className="px-3.5 py-1.5 border border-rose-300 text-rose-700 bg-white hover:bg-rose-50 rounded-xl text-xs font-bold transition-colors shrink-0"
+                        >
+                          Termin stornieren
+                        </button>
+                      ) : isAvailable ? (
+                        <button
+                          onClick={() => handleBookConference(conf.id)}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors shrink-0"
+                        >
+                          Slot reservieren
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1 bg-slate-200 text-slate-500 rounded-xl text-xs font-bold">
+                          Vergeben
+                        </span>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-slate-400 text-xs">
+                  Aktuell keine Sprechtag-Slots freigeschaltet.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: FOTO-GALERIE & PORTFOLIO (Modul C & B) */}
+      {activeTab === 'PHOTOS' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">Foto-Galerie & Kita-Portfolio</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Geschützte Fotoalben von Ausflügen, Projekten und Festen (DSGVO-konform mit Fotoerlaubnis).
+                </p>
+              </div>
+              <ImageIcon className="w-5 h-5 text-purple-600" />
+            </div>
+
+            <div className="space-y-6">
+              {overview?.photo_albums?.map((album: any) => (
+                <div key={album.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm">{album.title}</h4>
+                      <p className="text-xs text-slate-500">{album.description}</p>
+                    </div>
+                    <span className="text-[11px] text-slate-400 font-medium">{album.event_date}</span>
+                  </div>
+
+                  {/* Photo Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {album.photos?.map((photo: any) => (
+                      <div key={photo.id} className="group relative rounded-2xl overflow-hidden shadow-xs border border-slate-200 bg-white">
+                        <img
+                          src={photo.image_url}
+                          alt={photo.caption || 'Kita Foto'}
+                          className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                        {photo.caption && (
+                          <div className="p-2.5 text-[11px] text-slate-700 font-medium bg-white">
+                            {photo.caption}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: RECHNUNGEN & GEBÜHREN (Modul E) */}
+      {activeTab === 'BILLING' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-bold text-slate-900 text-sm">Monatsgebühren & Essensabrechnung</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Übersicht über Betreuungsbeiträge und tagesgenau abgerechnetes Essensgeld via SEPA-Lastschrift.
+                </p>
+              </div>
+              <Receipt className="w-5 h-5 text-emerald-600" />
+            </div>
+
+            <div className="space-y-3">
+              {overview?.invoices?.length > 0 ? (
+                overview.invoices.map((inv: any) => (
+                  <div key={inv.id} className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-slate-900 text-sm">Monat {inv.month}</span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                          {inv.status === 'SEPA_EXPORTED' ? '✓ SEPA-Einzug aktiv' : 'Offen'}
+                        </span>
+                      </div>
+                      <div className="text-slate-500 mt-1">
+                        Grundgebühr: {inv.base_care_fee.toFixed(2)} € ({inv.care_hours}h) • Essensgeld: {inv.meal_fee.toFixed(2)} € ({inv.meal_days_counted} Essenstage)
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-1 font-mono">
+                        IBAN: {inv.iban} • Mandat: {inv.mandate_ref}
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-base font-black text-emerald-700">{inv.total_amount.toFixed(2)} €</div>
+                      <span className="text-[10px] text-slate-400">SEPA-Lastschrift</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-slate-400 text-xs">
+                  Keine Rechnungen vorhanden.
+                </div>
+              )}
             </div>
           </div>
         </div>

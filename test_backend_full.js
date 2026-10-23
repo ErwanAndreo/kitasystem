@@ -2197,6 +2197,177 @@ async function testAll() {
     assert.strictEqual(unauthorizedRes.status, 403);
   });
 
+  // ---------------------------------------------------------------------------
+  // 49. MODUL E: WARTELISTE & ONLINE-VORANMELDUNG MIT PUNKTESYSTEM
+  // ---------------------------------------------------------------------------
+  let testWaitId = null;
+  await check('49. Modul E: Warteliste & Punkteberechnung & 1-Klick Platzzusage', async () => {
+    // 1. Voranmeldung anlegen (Geschwister=1 (+5), Einzugsgebiet=1 (+3) -> 8 Punkte)
+    const createRes = await fetch(`${BASE_URL}/api/waitlist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        child_first_name: 'Clara',
+        child_last_name: 'Sommer',
+        birth_date: '2024-03-12',
+        gender: 'W',
+        parent_name: 'Theresa Sommer',
+        parent_email: 'sommer@familie.de',
+        parent_phone: '0151-22334455',
+        desired_hours: 45,
+        desired_group_type: 'U3',
+        has_sibling: 1,
+        is_single_parent: 0,
+        is_employed: 0,
+        in_catchment_area: 1
+      })
+    });
+    assert.strictEqual(createRes.status, 201);
+    const createData = await createRes.json();
+    assert.strictEqual(createData.points, 8);
+    testWaitId = createData.id;
+
+    // 2. Warteliste abrufen und Ranking prüfen
+    const listRes = await fetch(`${BASE_URL}/api/waitlist`);
+    assert.strictEqual(listRes.status, 200);
+    const list = await listRes.json();
+    assert(list.length >= 1);
+    const clara = list.find(w => w.id === testWaitId);
+    assert(clara, 'Clara Sommer muss auf der Warteliste stehen');
+    assert.strictEqual(clara.points, 8);
+
+    // 3. 1-Klick Platzzusage & automatische Übernahme in die Stammakte
+    const enrollRes = await fetch(`${BASE_URL}/api/waitlist/${testWaitId}/accept-and-enroll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_id: 'g_u3_maeuse' })
+    });
+    assert.strictEqual(enrollRes.status, 200);
+    const enrollData = await enrollRes.json();
+    assert.strictEqual(enrollData.success, true);
+    assert(enrollData.child_id);
+    assert(enrollData.parent_id);
+
+    // 4. Prüfen ob Kind in Kinderakte existiert
+    const verifyChildRes = await fetch(`${BASE_URL}/api/children/${enrollData.child_id}`);
+    assert.strictEqual(verifyChildRes.status, 200);
+    const enrolledChild = await verifyChildRes.json();
+    assert.strictEqual(enrolledChild.first_name, 'Clara');
+    assert.strictEqual(enrolledChild.group_id, 'g_u3_maeuse');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 50. MODUL E: MONATSABRECHNUNG & ESSENSGELD-BERECHNUNG
+  // ---------------------------------------------------------------------------
+  await check('50. Modul E: Monatsabrechnung & Essensgeld-Kalkulation', async () => {
+    const currentMonth = new Date().toISOString().substring(0, 7);
+
+    // 1. Monatsabrechnung für alle aktiven Kinder generieren
+    const genRes = await fetch(`${BASE_URL}/api/billing/generate-month`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month: currentMonth })
+    });
+    assert.strictEqual(genRes.status, 200);
+    const genData = await genRes.json();
+    assert.strictEqual(genData.success, true);
+
+    // 2. Rechnungen für den Monat abrufen
+    const invRes = await fetch(`${BASE_URL}/api/billing/invoices?month=${currentMonth}`);
+    assert.strictEqual(invRes.status, 200);
+    const invList = await invRes.json();
+    assert(invList.length >= 1);
+    const firstInv = invList[0];
+    assert(firstInv.base_care_fee > 0);
+    assert(firstInv.meal_fee >= 0);
+    assert(firstInv.total_amount > 0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 51. MODUL E: SEPA-LASTSCHRIFTEN ISO 20022 XML EXPORT (pain.008)
+  // ---------------------------------------------------------------------------
+  await check('51. Modul E: SEPA Lastschrift XML pain.008.001.02 Export', async () => {
+    const currentMonth = new Date().toISOString().substring(0, 7);
+    const xmlRes = await fetch(`${BASE_URL}/api/billing/export-sepa-xml?month=${currentMonth}`);
+    assert.strictEqual(xmlRes.status, 200);
+    assert(xmlRes.headers.get('content-type')?.includes('xml'));
+    const xmlText = await xmlRes.text();
+
+    assert(xmlText.includes('<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">'));
+    assert(xmlText.includes('<CstmrDrctDbtInitn>'));
+    assert(xmlText.includes('<GrpHdr>'));
+    assert(xmlText.includes('<PmtMtd>DD</PmtMtd>'));
+    assert(xmlText.includes('<CdtrSchmeId>'));
+    assert(xmlText.includes('<Id>DE98ZZZ09999999999</Id>'));
+    assert(xmlText.includes('<DrctDbtTxInf>'));
+  });
+
+  // ---------------------------------------------------------------------------
+  // 52. MODUL E: BEHÖRDEN- & JUGENDAMT-MELDUNGEN (§ 98 SGB VIII / KiBiz)
+  // ---------------------------------------------------------------------------
+  await check('52. Modul E: Jugendamt-Statistik § 98 SGB VIII & CSV Export', async () => {
+    // 1. JSON Report
+    const repRes = await fetch(`${BASE_URL}/api/reports/youth-office`);
+    assert.strictEqual(repRes.status, 200);
+    const rep = await repRes.json();
+    assert.strictEqual(rep.kita_name, 'Kita Sonnenschein e.V.');
+    assert(rep.belegte_plaetze > 0);
+    assert(rep.age_distribution);
+    assert(rep.booking_hours);
+    assert(rep.staffing_summary.fachkraft_quote_percent >= 60);
+
+    // 2. CSV Export Download
+    const csvRes = await fetch(`${BASE_URL}/api/reports/youth-office/csv`);
+    assert.strictEqual(csvRes.status, 200);
+    assert(csvRes.headers.get('content-type')?.includes('csv'));
+    const csvText = await csvRes.text();
+    assert(csvText.includes('Nachname;Vorname;Geburtsdatum;Geschlecht;Buchungsstunden;Gruppe;Behördenstatus'));
+    assert(csvText.includes('Gemeldet § 98 SGB VIII'));
+  });
+
+  // ---------------------------------------------------------------------------
+  // 53. MODUL C: ENTWICKLUNGSGESPRÄCHE & SPRECHTAGE
+  // ---------------------------------------------------------------------------
+  await check('53. Modul C: Entwicklungsgespräche Slot-Buchung & Stornierung', async () => {
+    // 1. Verfügbare Termine abrufen
+    const confRes = await fetch(`${BASE_URL}/api/conferences`);
+    assert.strictEqual(confRes.status, 200);
+    const confs = await confRes.json();
+    assert(confs.length >= 1);
+    const available = confs.find(c => c.status === 'AVAILABLE');
+    assert(available, 'Mindestens ein freier Sprechtag-Termin muss vorhanden sein');
+
+    // 2. Termin für Kind buchen
+    const bookRes = await fetch(`${BASE_URL}/api/conferences/${available.id}/book`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent_id: 'p_anna_bergmann', child_id: 'c_u3_1' })
+    });
+    assert.strictEqual(bookRes.status, 200);
+    const bookData = await bookRes.json();
+    assert.strictEqual(bookData.success, true);
+
+    // 3. Stornieren
+    const cancelRes = await fetch(`${BASE_URL}/api/conferences/${available.id}/cancel`, { method: 'POST' });
+    assert.strictEqual(cancelRes.status, 200);
+    const cancelData = await cancelRes.json();
+    assert.strictEqual(cancelData.success, true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 54. MODUL C & B: DSGVO-FOTOGALERIE & PORTFOLIO
+  // ---------------------------------------------------------------------------
+  await check('54. Modul C & B: DSGVO Foto-Galerie & Portfolio', async () => {
+    const albumsRes = await fetch(`${BASE_URL}/api/photo-albums`);
+    assert.strictEqual(albumsRes.status, 200);
+    const albums = await albumsRes.json();
+    assert(albums.length >= 2);
+    const waldtag = albums.find(a => a.title.includes('Waldtag'));
+    assert(waldtag, 'Herbst-Waldtag Album muss existieren');
+    assert(waldtag.photos.length >= 2);
+    assert(waldtag.photos[0].image_url.startsWith('https://'));
+  });
+
   console.log(`\n========================================`);
   console.log(`🎯 Test Summary: ${passed} Passed, ${failed} Failed`);
   console.log(`========================================\n`);

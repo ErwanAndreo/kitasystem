@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDb } from './db.js';
-import { format } from 'date-fns';
+import { format, addDays } from 'date-fns';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1882,6 +1882,7 @@ app.get('/api/children/:id', (req, res) => {
     `).all(id);
 
     res.json({
+      ...child,
       child,
       health: health ? { ...health, allergies: JSON.parse(health.allergies || '[]') } : null,
       emergency_contacts: emergencyContacts,
@@ -2777,6 +2778,33 @@ app.get('/api/parents/:id/overview', (req, res) => {
     // 6. Announcements / Schwarzes Brett
     const announcements = db.prepare('SELECT * FROM announcements ORDER BY date DESC LIMIT 6').all();
 
+    // 7. Invoices & Billing
+    const invoices = db.prepare('SELECT * FROM billing_invoices WHERE parent_id = ? ORDER BY month DESC LIMIT 6').all(parentId);
+
+    // 8. Conferences / Entwicklungsgespräche Slots
+    const conferences = db.prepare(`
+      SELECT ptc.*, s.name as staff_name, g.name as group_name
+      FROM parent_teacher_conferences ptc
+      JOIN staff s ON ptc.staff_id = s.id
+      JOIN groups g ON ptc.group_id = g.id
+      WHERE ptc.status = 'AVAILABLE' OR ptc.booked_by_parent_id = ?
+      ORDER BY ptc.date ASC, ptc.time_start ASC
+    `).all(parentId);
+
+    // 9. Photo Albums (DSGVO-Portfolio)
+    const albums = db.prepare(`
+      SELECT pa.*, g.name as group_name, s.name as staff_name
+      FROM photo_albums pa
+      LEFT JOIN groups g ON pa.group_id = g.id
+      LEFT JOIN staff s ON pa.created_by_staff_id = s.id
+      ORDER BY pa.event_date DESC LIMIT 5
+    `).all() as any[];
+
+    const photoAlbums = albums.map(a => {
+      const photos = db.prepare('SELECT * FROM photos WHERE album_id = ? ORDER BY created_at ASC').all(a.id);
+      return { ...a, photos };
+    });
+
     res.json({
       parent: {
         id: parent.id,
@@ -2799,7 +2827,10 @@ app.get('/api/parents/:id/overview', (req, res) => {
       },
       polls: enrichedPolls,
       documents,
-      announcements
+      announcements,
+      invoices,
+      conferences,
+      photo_albums: photoAlbums
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -2862,6 +2893,488 @@ app.post('/api/parents/:parentId/pickup-authorizations', (req, res) => {
     `).run(authId, child_id, name, relationship, phone || null, photo_url || null, notes || null);
 
     res.status(201).json({ success: true, message: `Abholberechtigung für ${name} erfolgreich hinterlegt.`, id: authId });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 7. WARTELISTE & ONLINE-VORANMELDUNG (MODUL E)
+// ==========================================
+
+app.get('/api/waitlist', (req, res) => {
+  try {
+    const apps = db.prepare('SELECT * FROM waitlist_applications ORDER BY points DESC, created_at ASC').all();
+    res.json(apps);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/waitlist', (req, res) => {
+  try {
+    const {
+      child_first_name, child_last_name, birth_date, gender = 'U',
+      parent_name, parent_email, parent_phone,
+      desired_start_date, desired_hours = 35, desired_group_type = 'U3',
+      has_sibling = 0, is_single_parent = 0, is_employed = 1, in_catchment_area = 1,
+      notes = ''
+    } = req.body;
+
+    if (!child_first_name || !child_last_name || !parent_name || !parent_email) {
+      return res.status(400).json({ error: 'Name des Kindes und der Eltern sowie E-Mail sind Pflichtfelder' });
+    }
+
+    const points = (has_sibling ? 5 : 0) + (is_single_parent ? 4 : 0) + (in_catchment_area ? 3 : 0) + (is_employed ? 3 : 0);
+    const id = `wait_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    const now = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO waitlist_applications (
+        id, child_first_name, child_last_name, birth_date, gender, parent_name, parent_email, parent_phone,
+        desired_start_date, desired_hours, desired_group_type, points, has_sibling, is_single_parent, is_employed, in_catchment_area, status, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'WAITING', ?, ?)
+    `).run(
+      id, child_first_name, child_last_name, birth_date || format(new Date(), 'yyyy-MM-dd'), gender,
+      parent_name, parent_email, parent_phone || '', desired_start_date || format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+      desired_hours, desired_group_type, points, has_sibling ? 1 : 0, is_single_parent ? 1 : 0, is_employed ? 1 : 0, in_catchment_area ? 1 : 0,
+      notes, now
+    );
+
+    res.status(201).json({ success: true, id, points, message: `Bewerbung mit ${points} Punkten erfolgreich auf der Warteliste erfasst!` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/waitlist/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, points, notes } = req.body;
+    db.prepare(`
+      UPDATE waitlist_applications SET
+        status = COALESCE(?, status),
+        points = COALESCE(?, points),
+        notes = COALESCE(?, notes)
+      WHERE id = ?
+    `).run(status, points, notes, id);
+    res.json({ success: true, message: 'Wartelisteneintrag aktualisiert.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/waitlist/:id/accept-and-enroll', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { group_id } = req.body;
+    const app = db.prepare('SELECT * FROM waitlist_applications WHERE id = ?').get(id) as any;
+    if (!app) return res.status(404).json({ error: 'Bewerbung nicht gefunden' });
+
+    const targetGroupId = group_id || (app.desired_group_type === 'U3' ? 'g_u3_maeuse' : 'g_ue3_sonne');
+    const childId = `c_enrolled_${Date.now()}`;
+    const now = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO children (id, group_id, first_name, last_name, birth_date, gender, care_hours, contract_start, active, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(childId, targetGroupId, app.child_first_name, app.child_last_name, app.birth_date, app.gender, app.desired_hours, app.desired_start_date, now);
+
+    db.prepare(`
+      INSERT INTO child_health_records (child_id, allergies, dietary_needs, medication_plan, emergency_instructions, measles_vaccinated, doctor_name)
+      VALUES (?, '[]', 'Mischkost', NULL, NULL, 1, 'Kinderarztpraxis')
+    `).run(childId);
+
+    // Wiederverwendung bestehender Eltern-Account falls E-Mail schon vorhanden (z.B. Geschwisterkind)
+    let parentId = `p_enrolled_${Date.now()}`;
+    const existingParent = db.prepare('SELECT id FROM parent_accounts WHERE email = ?').get(app.parent_email) as any;
+    if (existingParent) {
+      parentId = existingParent.id;
+    } else {
+      db.prepare(`
+        INSERT INTO parent_accounts (id, email, password_hash, name, phone, preferred_language, role, board_position, mandatory_hours, created_at)
+        VALUES (?, ?, 'admin', ?, ?, 'de', 'ELTERN', NULL, 20.0, ?)
+      `).run(parentId, app.parent_email, app.parent_name, app.parent_phone, now);
+    }
+
+    db.prepare(`
+      INSERT OR REPLACE INTO parent_child_links (parent_id, child_id, is_primary_contact, photo_consent)
+      VALUES (?, ?, 1, 1)
+    `).run(parentId, childId);
+
+    db.prepare("UPDATE waitlist_applications SET status = 'ACCEPTED' WHERE id = ?").run(id);
+
+    res.json({
+      success: true,
+      message: `🎉 Platzzusage erfolgreich! ${app.child_first_name} ${app.child_last_name} wurde in Gruppe '${targetGroupId}' aufgenommen und Eltern-Account (${app.parent_email}) wurde angelegt.`,
+      child_id: childId,
+      parent_id: parentId
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 8. ABRECHNUNG, ESSENSGELD & SEPA (MODUL E)
+// ==========================================
+
+app.get('/api/billing/invoices', (req, res) => {
+  try {
+    const { month, parent_id } = req.query;
+    let query = `
+      SELECT bi.*, pa.name as parent_name, pa.email as parent_email, c.first_name as child_first_name, c.last_name as child_last_name, g.name as group_name
+      FROM billing_invoices bi
+      JOIN parent_accounts pa ON bi.parent_id = pa.id
+      JOIN children c ON bi.child_id = c.id
+      JOIN groups g ON c.group_id = g.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (month) {
+      query += ' AND bi.month = ?';
+      params.push(month);
+    }
+    if (parent_id) {
+      query += ' AND bi.parent_id = ?';
+      params.push(parent_id);
+    }
+    query += ' ORDER BY bi.created_at DESC';
+    const rows = db.prepare(query).all(...params);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/billing/generate-month', (req, res) => {
+  try {
+    const { month = format(new Date(), 'yyyy-MM') } = req.body;
+    const children = db.prepare(`
+      SELECT c.*, pcl.parent_id, pa.name as parent_name, pa.email as parent_email
+      FROM children c
+      JOIN parent_child_links pcl ON c.id = pcl.child_id AND pcl.is_primary_contact = 1
+      JOIN parent_accounts pa ON pcl.parent_id = pa.id
+      WHERE c.active = 1
+    `).all() as any[];
+
+    const insertInv = db.prepare(`
+      INSERT INTO billing_invoices (
+        id, parent_id, child_id, month, care_hours, base_care_fee, meal_fee, meal_days_counted, extra_fees, total_amount, status, iban, bic, mandate_ref, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        base_care_fee = excluded.base_care_fee,
+        meal_fee = excluded.meal_fee,
+        meal_days_counted = excluded.meal_days_counted,
+        total_amount = excluded.total_amount
+    `);
+
+    let generatedCount = 0;
+    const now = new Date().toISOString();
+
+    children.forEach(c => {
+      const invId = `inv_${c.id}_${month}`;
+      const baseFee = c.care_hours >= 45 ? 280.0 : c.care_hours >= 35 ? 190.0 : 120.0;
+      
+      const mealDays = db.prepare(`
+        SELECT COUNT(*) as days FROM child_attendance
+        WHERE child_id = ? AND date LIKE ? AND meal_ordered = 1
+      `).get(c.id, `${month}%`) as { days: number };
+
+      const daysCounted = mealDays?.days > 0 ? mealDays.days : 18;
+      const mealFee = Math.round(daysCounted * 4.20 * 100) / 100;
+      const totalAmount = Math.round((baseFee + mealFee) * 100) / 100;
+
+      insertInv.run(
+        invId, c.parent_id, c.id, month, c.care_hours,
+        baseFee, mealFee, daysCounted, 0.0, totalAmount,
+        'DE27100777770345678901', 'DEUTDEDBFXX', `MANDAT-${c.first_name.toUpperCase()}-${month}`, now
+      );
+      generatedCount++;
+    });
+
+    res.json({ success: true, message: `Monatsabrechnung für ${month} erfolgreich generiert (${generatedCount} Rechnungen).` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/billing/export-sepa-xml', (req, res) => {
+  try {
+    const { month = format(new Date(), 'yyyy-MM') } = req.query;
+    const invoices = db.prepare(`
+      SELECT bi.*, pa.name as parent_name, c.first_name as child_first_name, c.last_name as child_last_name
+      FROM billing_invoices bi
+      JOIN parent_accounts pa ON bi.parent_id = pa.id
+      JOIN children c ON bi.child_id = c.id
+      WHERE bi.month = ?
+    `).all(month) as any[];
+
+    const totalSum = invoices.reduce((sum, inv) => sum + inv.total_amount, 0).toFixed(2);
+    const executionDate = format(addDays(new Date(), 5), 'yyyy-MM-dd');
+    const msgId = `KITA-SEPA-${month}-${Date.now()}`;
+
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">
+  <CstmrDrctDbtInitn>
+    <GrpHdr>
+      <MsgId>${msgId}</MsgId>
+      <CreDtTm>${new Date().toISOString()}</CreDtTm>
+      <NbOfTxs>${invoices.length}</NbOfTxs>
+      <CtrlSum>${totalSum}</CtrlSum>
+      <InitgPty>
+        <Nm>Kita Sonnenschein e.V.</Nm>
+      </InitgPty>
+    </GrpHdr>
+    <PmtInf>
+      <PmtInfId>PMT-${month}-01</PmtInfId>
+      <PmtMtd>DD</PmtMtd>
+      <NbOfTxs>${invoices.length}</NbOfTxs>
+      <CtrlSum>${totalSum}</CtrlSum>
+      <PmtTpInf>
+        <SvcLvl><Cd>SEPA</Cd></SvcLvl>
+        <LclInstrm><Cd>CORE</Cd></LclInstrm>
+        <SeqTp>RCUR</SeqTp>
+      </PmtTpInf>
+      <ReqdColltnDt>${executionDate}</ReqdColltnDt>
+      <Cdtr>
+        <Nm>Kita Sonnenschein e.V.</Nm>
+      </Cdtr>
+      <CdtrAcct>
+        <Id><IBAN>DE89370400440532013000</IBAN></Id>
+      </CdtrAcct>
+      <CdtrAgt>
+        <FinInstnId><BIC>COBADEFFXXX</BIC></FinInstnId>
+      </CdtrAgt>
+      <CdtrSchmeId>
+        <Id>
+          <PrvtId>
+            <Othr>
+              <Id>DE98ZZZ09999999999</Id>
+              <SchmeNm><Prtry>SEPA</Prtry></SchmeNm>
+            </Othr>
+          </PrvtId>
+        </Id>
+      </CdtrSchmeId>
+${invoices.map((inv) => `      <DrctDbtTxInf>
+        <PmtId>
+          <EndToEndId>${inv.id}</EndToEndId>
+        </PmtId>
+        <InstdAmt Ccy="EUR">${inv.total_amount.toFixed(2)}</InstdAmt>
+        <DrctDbtTx>
+          <MndtRltdInf>
+            <MndtId>${inv.mandate_ref}</MndtId>
+            <DtOfSgntr>2026-01-15</DtOfSgntr>
+          </MndtRltdInf>
+        </DrctDbtTx>
+        <DbtrAgt>
+          <FinInstnId><BIC>${inv.bic}</BIC></FinInstnId>
+        </DbtrAgt>
+        <Dbtr>
+          <Nm>${inv.parent_name}</Nm>
+        </Dbtr>
+        <DbtrAcct>
+          <Id><IBAN>${inv.iban}</IBAN></Id>
+        </DbtrAcct>
+        <RmtInf>
+          <Ustrd>Kita-Gebuehren und Essensgeld ${inv.child_first_name} ${inv.child_last_name} ${month}</Ustrd>
+        </RmtInf>
+      </DrctDbtTxInf>`).join('\n')}
+    </PmtInf>
+  </CstmrDrctDbtInitn>
+</Document>`;
+
+    db.prepare("UPDATE billing_invoices SET status = 'SEPA_EXPORTED' WHERE month = ?").run(month);
+
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Content-Disposition', `attachment; filename="SEPA_Lastschrift_${month}.xml"`);
+    res.send(xml);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 9. BEHÖRDEN- & JUGENDAMT-MELDUNGEN (MODUL E)
+// ==========================================
+
+app.get('/api/reports/youth-office', (req, res) => {
+  try {
+    const allChildren = db.prepare('SELECT birth_date, care_hours, gender, active FROM children WHERE active = 1').all() as any[];
+    const now = new Date();
+    
+    let u1 = 0, u2 = 0, u3 = 0, ue3 = 0;
+    let h25 = 0, h35 = 0, h45 = 0;
+
+    allChildren.forEach(c => {
+      const bDate = new Date(c.birth_date);
+      const ageYears = (now.getTime() - bDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+      if (ageYears < 1.0) u1++;
+      else if (ageYears < 2.0) u2++;
+      else if (ageYears < 3.0) u3++;
+      else ue3++;
+
+      if (c.care_hours <= 25) h25++;
+      else if (c.care_hours <= 35) h35++;
+      else h45++;
+    });
+
+    const staff = db.prepare('SELECT role, is_fachkraft, weekly_hours FROM staff WHERE is_active = 1').all() as any[];
+    const totalStaffHours = staff.reduce((sum, s) => sum + s.weekly_hours, 0);
+    const fachkraftHours = staff.filter(s => s.is_fachkraft === 1).reduce((sum, s) => sum + s.weekly_hours, 0);
+    const fteCount = Math.round((totalStaffHours / 39.0) * 10) / 10;
+    const fachkraftQuotePercent = totalStaffHours > 0 ? Math.round((fachkraftHours / totalStaffHours) * 100) : 0;
+
+    res.json({
+      reporting_date: format(new Date(), 'yyyy-MM-dd'),
+      kita_name: 'Kita Sonnenschein e.V.',
+      betriebserlaubnis_plaetze: 65,
+      belegte_plaetze: allChildren.length,
+      auslastung_percent: Math.round((allChildren.length / 65) * 100),
+      age_distribution: { under_1_year: u1, age_1_to_2: u2, age_2_to_3: u3, age_3_to_6: ue3, total_u3: u1 + u2 + u3, total_ue3: ue3 },
+      booking_hours: { hours_25: h25, hours_35: h35, hours_45: h45 },
+      staffing_summary: {
+        headcount: staff.length,
+        full_time_equivalents: fteCount,
+        fachkraft_quote_percent: fachkraftQuotePercent,
+        legal_compliance_sgb_viii: fachkraftQuotePercent >= 67
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/reports/youth-office/csv', (req, res) => {
+  try {
+    const reportRes = db.prepare(`
+      SELECT c.first_name, c.last_name, c.birth_date, c.gender, c.care_hours, g.name as group_name
+      FROM children c
+      JOIN groups g ON c.group_id = g.id
+      WHERE c.active = 1
+      ORDER BY g.name ASC, c.last_name ASC
+    `).all() as any[];
+
+    let csv = 'Nachname;Vorname;Geburtsdatum;Geschlecht;Buchungsstunden;Gruppe;Behördenstatus\n';
+    reportRes.forEach(r => {
+      csv += `${r.last_name};${r.first_name};${r.birth_date};${r.gender};${r.care_hours};${r.group_name};Gemeldet § 98 SGB VIII\n`;
+    });
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="Jugendamt_Meldung_${format(new Date(), 'yyyy-MM')}.csv"`);
+    res.send(csv);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 10. ENTWICKLUNGSGESPRÄCHE & SPRECHTAGE (MODUL C)
+// ==========================================
+
+app.get('/api/conferences', (req, res) => {
+  try {
+    const { group_id } = req.query;
+    let query = `
+      SELECT ptc.*, s.name as staff_name, g.name as group_name, pa.name as booked_parent_name, c.first_name as booked_child_name
+      FROM parent_teacher_conferences ptc
+      JOIN staff s ON ptc.staff_id = s.id
+      JOIN groups g ON ptc.group_id = g.id
+      LEFT JOIN parent_accounts pa ON ptc.booked_by_parent_id = pa.id
+      LEFT JOIN children c ON ptc.booked_child_id = c.id
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (group_id) { query += ' AND ptc.group_id = ?'; params.push(group_id); }
+    query += ' ORDER BY ptc.date ASC, ptc.time_start ASC';
+    const rows = db.prepare(query).all(...params);
+    res.json(rows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/conferences/:id/book', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { parent_id, child_id, notes } = req.body;
+    if (!parent_id || !child_id) return res.status(400).json({ error: 'parent_id und child_id erforderlich' });
+
+    const conf = db.prepare('SELECT * FROM parent_teacher_conferences WHERE id = ?').get(id) as any;
+    if (!conf) return res.status(404).json({ error: 'Termin nicht gefunden' });
+    if (conf.status !== 'AVAILABLE') return res.status(400).json({ error: 'Dieser Termin ist bereits vergeben' });
+
+    db.prepare(`
+      UPDATE parent_teacher_conferences SET
+        status = 'BOOKED',
+        booked_by_parent_id = ?,
+        booked_child_id = ?,
+        notes = ?
+      WHERE id = ?
+    `).run(parent_id, child_id, notes || 'Termin gebucht über Eltern-App', id);
+
+    res.json({ success: true, message: 'Entwicklungsgespräch erfolgreich reserviert!' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/conferences/:id/cancel', (req, res) => {
+  try {
+    const { id } = req.params;
+    db.prepare(`
+      UPDATE parent_teacher_conferences SET
+        status = 'AVAILABLE',
+        booked_by_parent_id = NULL,
+        booked_child_id = NULL,
+        notes = NULL
+      WHERE id = ?
+    `).run(id);
+
+    res.json({ success: true, message: 'Termin erfolgreich freigegeben.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 11. DSGVO-FOTOGALERIE & PORTFOLIO (MODUL C & B)
+// ==========================================
+
+app.get('/api/photo-albums', (req, res) => {
+  try {
+    const albums = db.prepare(`
+      SELECT pa.*, g.name as group_name, s.name as staff_name
+      FROM photo_albums pa
+      LEFT JOIN groups g ON pa.group_id = g.id
+      LEFT JOIN staff s ON pa.created_by_staff_id = s.id
+      ORDER BY pa.event_date DESC
+    `).all() as any[];
+
+    const result = albums.map(a => {
+      const photos = db.prepare('SELECT * FROM photos WHERE album_id = ? ORDER BY created_at ASC').all(a.id);
+      return { ...a, photos };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/photo-albums', (req, res) => {
+  try {
+    const { title, description, group_id, event_date, created_by_staff_id = 's_sabine' } = req.body;
+    if (!title) return res.status(400).json({ error: 'Titel erforderlich' });
+
+    const albumId = `album_${Date.now()}`;
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO photo_albums (id, title, description, group_id, event_date, created_by_staff_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(albumId, title, description || '', group_id || null, event_date || format(new Date(), 'yyyy-MM-dd'), created_by_staff_id, now);
+
+    res.status(201).json({ success: true, albumId });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

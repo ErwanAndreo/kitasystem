@@ -13,6 +13,7 @@ import { TabletKioskView } from './components/TabletKioskView';
 import { RatioSettingsView } from './components/RatioSettingsView';
 import { ParentInitiativeManagement } from './components/ParentInitiativeManagement';
 import { ParentPortalView } from './components/ParentPortalView';
+import { FinanceAndWaitlistView } from './components/FinanceAndWaitlistView';
 import { AutopilotWidget } from './components/AutopilotWidget';
 import { EinspringKaskadeWidget } from './components/EinspringKaskadeWidget';
 import { MobileAppView } from './components/MobileAppView';
@@ -35,13 +36,14 @@ import {
   ShieldAlert, 
   Baby, 
   Sliders,
-  Building2
+  Building2,
+  Landmark
 } from 'lucide-react';
 
 export const App: React.FC = () => {
   const { t } = useLanguage();
   const [currentView, setCurrentView] = useState<'LEITUNG' | 'MOBILE' | 'TABLET' | 'ELTERN'>('LEITUNG');
-  const [leitungTab, setLeitungTab] = useState<'DASHBOARD' | 'ROSTER' | 'CHILDREN' | 'GROUPS' | 'STAFF' | 'NOTEBOOK' | 'CHECKLISTS' | 'RATIO_SETTINGS' | 'INITIATIVE'>('DASHBOARD');
+  const [leitungTab, setLeitungTab] = useState<'DASHBOARD' | 'ROSTER' | 'CHILDREN' | 'GROUPS' | 'STAFF' | 'NOTEBOOK' | 'CHECKLISTS' | 'RATIO_SETTINGS' | 'INITIATIVE' | 'FINANCE_WAITLIST'>('DASHBOARD');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
 
   const [staffList, setStaffList] = useState<Staff[]>([]);
@@ -552,6 +554,19 @@ export const App: React.FC = () => {
                     <Building2 className="w-4 h-4" />
                     <span>Träger & Initiative</span>
                   </button>
+
+                  <button
+                    onClick={() => setLeitungTab('FINANCE_WAITLIST')}
+                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      leitungTab === 'FINANCE_WAITLIST'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                    title="Modul E: Warteliste, SEPA-Abrechnung & Behördenstatistiken"
+                  >
+                    <Landmark className="w-4 h-4" />
+                    <span>Finanzen & Warteliste</span>
+                  </button>
                 </div>
 
                 {/* Sub-view 1: DASHBOARD & LIVE-RADAR */}
@@ -641,6 +656,11 @@ export const App: React.FC = () => {
                 {/* Sub-view 8: TRÄGERVEREIN & ELTERNINITIATIVE (LAGE.app Parität) */}
                 {leitungTab === 'INITIATIVE' && (
                   <ParentInitiativeManagement showToast={showToast} />
+                )}
+
+                {/* Sub-view 9: VERWALTUNG, FINANZEN & WARTELISTE (MODUL E) */}
+                {leitungTab === 'FINANCE_WAITLIST' && (
+                  <FinanceAndWaitlistView showToast={showToast} />
                 )}
               </div>
             )}

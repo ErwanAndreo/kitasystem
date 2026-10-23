@@ -487,6 +487,94 @@ export function initDb() {
       last_active TEXT,
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE SET NULL
     );
+
+    -- Modul E: Warteliste & Voranmeldung mit Punktesystem
+    CREATE TABLE IF NOT EXISTS waitlist_applications (
+      id TEXT PRIMARY KEY,
+      child_first_name TEXT NOT NULL,
+      child_last_name TEXT NOT NULL,
+      birth_date TEXT NOT NULL,
+      gender TEXT NOT NULL DEFAULT 'U',
+      parent_name TEXT NOT NULL,
+      parent_email TEXT NOT NULL,
+      parent_phone TEXT NOT NULL,
+      desired_start_date TEXT NOT NULL,
+      desired_hours INTEGER NOT NULL DEFAULT 35,
+      desired_group_type TEXT NOT NULL DEFAULT 'U3',
+      points INTEGER NOT NULL DEFAULT 0,
+      has_sibling INTEGER NOT NULL DEFAULT 0,
+      is_single_parent INTEGER NOT NULL DEFAULT 0,
+      is_employed INTEGER NOT NULL DEFAULT 1,
+      in_catchment_area INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL DEFAULT 'WAITING', -- 'WAITING', 'OFFERED', 'ACCEPTED', 'REJECTED'
+      notes TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    -- Modul E: Abrechnung & SEPA-Lastschriften
+    CREATE TABLE IF NOT EXISTS billing_invoices (
+      id TEXT PRIMARY KEY,
+      parent_id TEXT NOT NULL,
+      child_id TEXT NOT NULL,
+      month TEXT NOT NULL,
+      care_hours INTEGER NOT NULL DEFAULT 35,
+      base_care_fee REAL NOT NULL,
+      meal_fee REAL NOT NULL,
+      meal_days_counted INTEGER NOT NULL DEFAULT 0,
+      extra_fees REAL NOT NULL DEFAULT 0.0,
+      total_amount REAL NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'SEPA_EXPORTED', 'PAID'
+      iban TEXT NOT NULL,
+      bic TEXT NOT NULL,
+      mandate_ref TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
+    );
+
+    -- Modul C: Entwicklungsgespräche & Sprechtag-Slots
+    CREATE TABLE IF NOT EXISTS parent_teacher_conferences (
+      id TEXT PRIMARY KEY,
+      staff_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      date TEXT NOT NULL,
+      time_start TEXT NOT NULL,
+      time_end TEXT NOT NULL,
+      room TEXT NOT NULL DEFAULT 'Besprechungsraum 1',
+      status TEXT NOT NULL DEFAULT 'AVAILABLE', -- 'AVAILABLE', 'BOOKED', 'COMPLETED'
+      booked_by_parent_id TEXT,
+      booked_child_id TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (booked_by_parent_id) REFERENCES parent_accounts(id) ON DELETE SET NULL,
+      FOREIGN KEY (booked_child_id) REFERENCES children(id) ON DELETE SET NULL
+    );
+
+    -- Modul C & B: DSGVO-Foto-Galerie & Portfolio
+    CREATE TABLE IF NOT EXISTS photo_albums (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      group_id TEXT,
+      event_date TEXT NOT NULL,
+      created_by_staff_id TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by_staff_id) REFERENCES staff(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS photos (
+      id TEXT PRIMARY KEY,
+      album_id TEXT NOT NULL,
+      image_url TEXT NOT NULL,
+      caption TEXT,
+      requires_consent INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (album_id) REFERENCES photo_albums(id) ON DELETE CASCADE
+    );
   `);
 
   try {
@@ -1067,6 +1155,99 @@ function seedChildModuleData() {
     insertLog.run('log_2', 'c_u3_1', todayStr, 'MEAL', '11:45', null, 'Kartoffel-Möhren-Püree komplett aufgegessen & Nachtisch genossen', 's_elena', now);
     insertLog.run('log_3', 'c_u3_1', todayStr, 'DIAPER', '14:15', null, 'Gewickelt (nass, alles i.O.)', 's_jonas', now);
     insertLog.run('log_4', 'c_u3_1', todayStr, 'NOTE', '10:15', null, 'Hat heute begeistert mit Bauklötzen einen hohen Turm gebaut!', 's_elena', now);
+  }
+
+  // Seed Warteliste (Modul E: Platzvergabe & Punktesystem)
+  const waitlistCount = db.prepare('SELECT COUNT(*) as count FROM waitlist_applications').get() as { count: number };
+  if (waitlistCount.count === 0) {
+    const insertWait = db.prepare(`
+      INSERT INTO waitlist_applications (
+        id, child_first_name, child_last_name, birth_date, gender, parent_name, parent_email, parent_phone,
+        desired_start_date, desired_hours, desired_group_type, points, has_sibling, is_single_parent, is_employed, in_catchment_area, status, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertWait.run(
+      'wait_1', 'Emil', 'Fischer', '2024-08-15', 'M', 'Katharina Fischer', 'fischer@web.de', '0170-1122334',
+      format(addDays(new Date(), 30), 'yyyy-MM-dd'), 45, 'U3', 11, 1, 0, 1, 1, 'WAITING', 'Geschwisterkind bereits in Sonnenschein', now
+    );
+    insertWait.run(
+      'wait_2', 'Sophia', 'Weber', '2023-11-20', 'W', 'Markus Weber', 'weber@gmx.de', '0175-9988776',
+      format(addDays(new Date(), 15), 'yyyy-MM-dd'), 35, 'U3', 8, 0, 1, 1, 1, 'OFFERED', 'Platz in Krabbelmäuse angeboten', now
+    );
+    insertWait.run(
+      'wait_3', 'Paul', 'Hoffmann', '2022-04-10', 'M', 'Julia Hoffmann', 'hoffmann@eltern.de', '0160-5544332',
+      format(addDays(new Date(), 60), 'yyyy-MM-dd'), 45, 'UE3', 6, 0, 0, 1, 1, 'WAITING', 'Wechsel von Tagesmutter', now
+    );
+  }
+
+  // Seed Monatsabrechnung & SEPA-Lastschriften (Modul E)
+  const invoiceCount = db.prepare('SELECT COUNT(*) as count FROM billing_invoices').get() as { count: number };
+  if (invoiceCount.count === 0) {
+    const insertInv = db.prepare(`
+      INSERT INTO billing_invoices (
+        id, parent_id, child_id, month, care_hours, base_care_fee, meal_fee, meal_days_counted, extra_fees, total_amount, status, iban, bic, mandate_ref, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const currentMonth = format(new Date(), 'yyyy-MM');
+    insertInv.run(
+      'inv_1', 'p_michael_bauer', 'c_ue3_s1', currentMonth, 35, 190.00, 75.60, 18, 0.0, 265.60, 'PENDING',
+      'DE89370400440532013000', 'COBADEFFXXX', 'MANDAT-BAUER-2026', now
+    );
+    insertInv.run(
+      'inv_2', 'p_anna_bergmann', 'c_u3_1', currentMonth, 45, 280.00, 67.20, 16, 0.0, 347.20, 'PENDING',
+      'DE27100777770345678901', 'DEUTDEDBFXX', 'MANDAT-BERGMANN-2026', now
+    );
+  }
+
+  // Seed Entwicklungsgespräche & Sprechtag-Slots (Modul C)
+  const confCount = db.prepare('SELECT COUNT(*) as count FROM parent_teacher_conferences').get() as { count: number };
+  if (confCount.count === 0) {
+    const insertConf = db.prepare(`
+      INSERT INTO parent_teacher_conferences (
+        id, staff_id, group_id, title, date, time_start, time_end, room, status, booked_by_parent_id, booked_child_id, notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const nextWeek = format(addDays(new Date(), 7), 'yyyy-MM-dd');
+    const inTwoWeeks = format(addDays(new Date(), 10), 'yyyy-MM-dd');
+
+    insertConf.run(
+      'conf_1', 's_sarah', 'g_ue3_sonne', 'Entwicklungsgespräch 1. Halbjahr', nextWeek, '14:00', '14:30', 'Besprechungsraum 1',
+      'AVAILABLE', null, null, 'Vorbereitung Portfolio & Sprachstand', now
+    );
+    insertConf.run(
+      'conf_2', 's_sarah', 'g_ue3_sonne', 'Entwicklungsgespräch 1. Halbjahr', nextWeek, '14:35', '15:05', 'Besprechungsraum 1',
+      'AVAILABLE', null, null, 'Vorbereitung Portfolio & Sprachstand', now
+    );
+    insertConf.run(
+      'conf_3', 's_elena', 'g_u3_maeuse', 'U3 Eingewöhnungs- & Entwicklungsbilanz', inTwoWeeks, '13:30', '14:00', 'Gruppenraum Krabbelmäuse',
+      'BOOKED', 'p_anna_bergmann', 'c_u3_1', 'Fokus: Motorik & Selbstständigkeit beim Essen', now
+    );
+  }
+
+  // Seed Foto-Galerie (Modul C & B: DSGVO-Portfolio)
+  const albumCount = db.prepare('SELECT COUNT(*) as count FROM photo_albums').get() as { count: number };
+  if (albumCount.count === 0) {
+    const insertAlbum = db.prepare(`
+      INSERT INTO photo_albums (id, title, description, group_id, event_date, created_by_staff_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertPhoto = db.prepare(`
+      INSERT INTO photos (id, album_id, image_url, caption, requires_consent, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    insertAlbum.run(
+      'album_1', 'Herbst-Waldtag & Naturforscher', 'Gemeinsamer Ausflug der Sonnenscheingruppe in den Stadtwald mit Laubhüttenbau',
+      'g_ue3_sonne', format(addDays(new Date(), -3), 'yyyy-MM-dd'), 's_lukas', now
+    );
+    insertPhoto.run('photo_1', 'album_1', 'https://images.unsplash.com/photo-1502086223501-7ea6ecd79368?auto=format&fit=crop&w=800&q=80', 'Bunte Eichen- und Buchenblätter gesammelt', 1, now);
+    insertPhoto.run('photo_2', 'album_1', 'https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=800&q=80', 'Gemeinsamer Bau einer Waldhütte aus Ästen', 1, now);
+
+    insertAlbum.run(
+      'album_2', 'Laternen basteln & Fingerspiele', 'Vorbereitung für das St. Martinsfest in der Krippe',
+      'g_u3_maeuse', format(addDays(new Date(), -6), 'yyyy-MM-dd'), 's_elena', now
+    );
+    insertPhoto.run('photo_3', 'album_2', 'https://images.unsplash.com/photo-1516627145497-ae6968895b74?auto=format&fit=crop&w=800&q=80', 'Kreatives Gestalten mit Fingerfarben', 1, now);
   }
 }
 
