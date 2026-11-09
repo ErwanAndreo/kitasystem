@@ -4,7 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db, initDb } from './db.js';
-import { format, addDays } from 'date-fns';
+import { format, addDays, addMonths, endOfMonth, parseISO, getISOWeek, startOfISOWeek, endOfISOWeek } from 'date-fns';
+import { parseRules, ruleIssues, sanitizeRules, RuleIssue } from './availability.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +30,7 @@ app.use((req, res, next) => {
 
 // Initialize SQLite database
 initDb();
+syncGroupRatios();
 
 // ---------------------------------------------------------------------------
 // 0. HEALTH CHECK & SYSTEM DIAGNOSTICS
@@ -64,15 +66,29 @@ app.get('/api/health', (req, res) => {
   }
 });
 
+const BACKUP_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
+
 // Hot live backup of SQLite database without locking
+async function createBackup() {
+  const backupDir = path.resolve(__dirname, '../../backups');
+  fs.mkdirSync(backupDir, { recursive: true });
+  const backupPath = path.join(backupDir, `kita_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.sqlite`);
+  await db.backup(backupPath);
+
+  // Erst nach erfolgreichem Backup aufräumen; gilt auch für die Update-Sicherungen.
+  for (const name of fs.readdirSync(backupDir)) {
+    if (!/^(kita_backup_|update_)/.test(name)) continue;
+    const entry = path.join(backupDir, name);
+    if (Date.now() - fs.statSync(entry).mtimeMs > BACKUP_RETENTION_MS) {
+      fs.rmSync(entry, { recursive: true, force: true });
+    }
+  }
+  return backupPath;
+}
+
 app.post('/api/admin/backup', async (req, res) => {
   try {
-    const backupDir = path.resolve(__dirname, '../../backups');
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-    }
-    const backupPath = path.join(backupDir, `kita_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.sqlite`);
-    await db.backup(backupPath);
+    const backupPath = await createBackup();
     res.json({ success: true, backupPath, timestamp: new Date().toISOString() });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -110,6 +126,7 @@ app.get('/api/staff', (req, res) => {
         ...s,
         skills: JSON.parse(s.skills || '[]'),
         secondary_roles: JSON.parse(s.secondary_roles || '[]'),
+        availability_rules: parseRules(s.availability_rules),
         certifications: certs
       };
     });
@@ -506,7 +523,7 @@ app.post('/api/checklists', (req, res) => {
     const now = new Date().toISOString();
     const parsedItems = items || [];
     const creatorId = created_by_id || 's_sabine';
-    const creatorName = created_by_name || 'Sabine Weber (Leitung)';
+    const creatorName = created_by_name || 'Einrichtungsleitung';
 
     // Scope defaults
     let finalScope = share_scope || (is_shared ? 'ALL' : 'PRIVATE');
@@ -765,7 +782,7 @@ app.post('/api/staff', (req, res) => {
     const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
     db.prepare(`
       INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
-      VALUES (?, ?, 'HOURS_CHANGE', 'Mitarbeiter-Konto eingerichtet (Standard-Login: admin / admin)', ?, 'Sabine Weber (Leitung)', ?, 0)
+      VALUES (?, ?, 'HOURS_CHANGE', 'Mitarbeiter-Konto eingerichtet (Standard-Login: admin / admin)', ?, 'Einrichtungsleitung', ?, 0)
     `).run(
       logId, id, 
       `Konto angelegt mit ${weekly_hours || 39.0} Std./Woche (${work_days || 5} Tage), ${annual_vacation_days || 30} Urlaubstage. Standard-Zugang: ${finalUsername} / ${finalPassword}.`, 
@@ -840,7 +857,7 @@ app.put('/api/staff/:id', (req, res) => {
       const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       db.prepare(`
         INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
-        VALUES (?, ?, 'HOURS_CHANGE', 'Vertragliche Wochenstunden angepasst', ?, 'Sabine Weber (Leitung)', ?, 0)
+        VALUES (?, ?, 'HOURS_CHANGE', 'Vertragliche Wochenstunden angepasst', ?, 'Einrichtungsleitung', ?, 0)
       `).run(
         logId, staffId,
         `Deine Wochenstunden wurden von ${existing.weekly_hours}h auf ${weekly_hours}h angepasst.`,
@@ -1122,6 +1139,107 @@ app.post('/api/auth/change-password', (req, res) => {
 // ---------------------------------------------------------------------------
 // 2. ÜBERSTUNDEN & ZEITKONTEN TRACKING
 // ---------------------------------------------------------------------------
+const ymd = (d: Date) => format(d, 'yyyy-MM-dd');
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+const minutesBetween = (from: string, to: string) => {
+  const [fromH, fromM] = from.split(':').map(Number);
+  const [toH, toM] = to.split(':').map(Number);
+  return Math.max(0, toH * 60 + toM - (fromH * 60 + fromM));
+};
+
+// Konzeptionstage bleiben Arbeitstage, das Team arbeitet dort.
+// shortcut: gesetzliche Feiertage kennt das System nicht, sie zählen erst als frei, wenn sie als Schließtag eingetragen sind.
+function workdaysBetween(start: string, end: string): string[] {
+  const closed = new Set(
+    (db.prepare("SELECT date FROM kita_closures WHERE type != 'KONZEPTIONSTAG' AND date BETWEEN ? AND ?").all(start, end) as any[]).map(c => c.date)
+  );
+  const days: string[] = [];
+  for (let d = parseISO(start); ymd(d) <= end; d = addDays(d, 1)) {
+    if (d.getDay() !== 0 && d.getDay() !== 6 && !closed.has(ymd(d))) days.push(ymd(d));
+  }
+  return days;
+}
+
+function approvedAbsenceDays(staffId: string, start: string, end: string, type?: string): Set<string> {
+  const rows = db.prepare(`
+    SELECT start_date, end_date FROM absences
+    WHERE staff_id = ? AND status = 'APPROVED' AND start_date <= ? AND end_date >= ?${type ? ' AND type = ?' : ''}
+  `).all(...(type ? [staffId, end, start, type] : [staffId, end, start])) as any[];
+
+  const days = new Set<string>();
+  for (const r of rows) {
+    const from = r.start_date > start ? r.start_date : start;
+    const to = r.end_date < end ? r.end_date : end;
+    workdaysBetween(from, to).forEach(d => days.add(d));
+  }
+  return days;
+}
+
+// Teilzeit: 10 Werktage Urlaub bei einer 3-Tage-Woche sind 6 Urlaubstage.
+function remainingVacationDays(staff: any, year: string | number): number {
+  const weekdays = approvedAbsenceDays(staff.id, `${year}-01-01`, `${year}-12-31`, 'VACATION').size;
+  const used = Math.round(weekdays * ((staff.work_days || 5) / 5) * 2) / 2;
+  return Math.max(0, (staff.annual_vacation_days || 30) - used);
+}
+
+// Soll zählt ab dem ersten Stempeln, nur bis heute und ohne Abwesenheits- und Schließtage.
+function monthHours(staff: any, month: string) {
+  const logs = db.prepare(`
+    SELECT * FROM timelogs
+    WHERE staff_id = ? AND date LIKE ? AND clock_out IS NOT NULL
+  `).all(staff.id, `${month}%`) as any[];
+
+  const workedMinutes = logs.reduce((sum, l) => {
+    return sum + Math.max(0, minutesBetween(l.clock_in, l.clock_out) - (l.break_minutes || 0));
+  }, 0);
+
+  const adjustments = db.prepare(`
+    SELECT COALESCE(SUM(hours), 0) as total_adj FROM overtime_adjustments
+    WHERE staff_id = ? AND date LIKE ?
+  `).get(staff.id, `${month}%`) as { total_adj: number };
+
+  const today = ymd(new Date());
+  const firstLog = (db.prepare('SELECT MIN(date) as d FROM timelogs WHERE staff_id = ?').get(staff.id) as { d: string | null }).d;
+  const monthStart = `${month}-01`;
+  const monthEnd = ymd(endOfMonth(parseISO(monthStart)));
+  const from = firstLog && firstLog > monthStart ? firstLog : monthStart;
+  const to = monthEnd < today ? monthEnd : today;
+
+  let targetDays = 0;
+  if (firstLog && from <= to) {
+    const absent = approvedAbsenceDays(staff.id, from, to);
+    const finishedToday = logs.some(l => l.date === today);
+    targetDays = workdaysBetween(from, to).filter(d => !absent.has(d) && (d < today || finishedToday)).length;
+  }
+
+  const target = round2(targetDays * (staff.weekly_hours / 5));
+  const actual = round2(workedMinutes / 60);
+  return {
+    target_month_hours: target,
+    actual_hours: actual,
+    adjustments_hours: adjustments.total_adj,
+    overtime_hours: round2(actual + adjustments.total_adj - target)
+  };
+}
+
+// Überstundenkonto: alle Monate seit dem ersten Eintrag bis einschließlich throughMonth.
+function overtimeBalance(staff: any, throughMonth: string): number {
+  const first = (db.prepare(`
+    SELECT MIN(d) as d FROM (
+      SELECT MIN(date) as d FROM timelogs WHERE staff_id = ?
+      UNION ALL SELECT MIN(date) FROM overtime_adjustments WHERE staff_id = ?
+    )
+  `).get(staff.id, staff.id) as { d: string | null }).d;
+  if (!first) return 0;
+
+  let balance = 0;
+  for (let m = first.slice(0, 7); m <= throughMonth; m = format(addMonths(parseISO(`${m}-01`), 1), 'yyyy-MM')) {
+    balance += monthHours(staff, m).overtime_hours;
+  }
+  return round2(balance);
+}
+
 app.get('/api/staff/:id/stats', (req, res) => {
   try {
     const staffId = req.params.id;
@@ -1129,34 +1247,7 @@ app.get('/api/staff/:id/stats', (req, res) => {
     const staff = db.prepare('SELECT * FROM staff WHERE id = ?').get(staffId) as any;
     if (!staff) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
 
-    const logs = db.prepare(`
-      SELECT * FROM timelogs 
-      WHERE staff_id = ? AND date LIKE ? AND clock_out IS NOT NULL
-    `).all(staffId, `${currentMonth}%`) as any[];
-
-    let totalMinutes = 0;
-    logs.forEach(l => {
-      const [inH, inM] = l.clock_in.split(':').map(Number);
-      const [outH, outM] = l.clock_out.split(':').map(Number);
-      const worked = (outH * 60 + outM) - (inH * 60 + inM) - (l.break_minutes || 0);
-      if (worked > 0) totalMinutes += worked;
-    });
-
-    const adjustments = db.prepare(`
-      SELECT COALESCE(SUM(hours), 0) as total_adj FROM overtime_adjustments
-      WHERE staff_id = ? AND date LIKE ?
-    `).get(staffId, `${currentMonth}%`) as { total_adj: number };
-
-    const actualHours = parseFloat((totalMinutes / 60).toFixed(2));
-    const targetMonthlyHours = parseFloat((staff.weekly_hours * 4.33).toFixed(2));
-    const overtimeHours = parseFloat((actualHours + adjustments.total_adj - targetMonthlyHours).toFixed(2));
-
-    const vacationAbsences = db.prepare(`
-      SELECT COUNT(*) as c FROM absences 
-      WHERE staff_id = ? AND type = 'VACATION' AND status = 'APPROVED'
-    `).get(staffId) as { c: number };
-
-    const remainingVacationDays = Math.max(0, (staff.annual_vacation_days || 30) - (vacationAbsences.c || 0));
+    const hours = monthHours(staff, currentMonth);
 
     res.json({
       staff_id: staffId,
@@ -1164,11 +1255,10 @@ app.get('/api/staff/:id/stats', (req, res) => {
       month: currentMonth,
       weekly_hours: staff.weekly_hours,
       work_days: staff.work_days || 5,
-      target_month_hours: targetMonthlyHours,
-      actual_hours: actualHours,
-      adjustments_hours: adjustments.total_adj,
-      overtime_hours: overtimeHours,
-      remaining_vacation_days: remainingVacationDays,
+      ...hours,
+      month_overtime_hours: hours.overtime_hours,
+      overtime_hours: overtimeBalance(staff, currentMonth),
+      remaining_vacation_days: remainingVacationDays(staff, currentMonth.slice(0, 4)),
       total_vacation_days: staff.annual_vacation_days || 30,
       skills: JSON.parse(staff.skills || '[]'),
       secondary_roles: JSON.parse(staff.secondary_roles || '[]')
@@ -1184,27 +1274,7 @@ app.get('/api/time-overview', (req, res) => {
     const staffList = db.prepare('SELECT * FROM staff WHERE is_active = 1 ORDER BY name ASC').all() as any[];
 
     const overview = staffList.map(s => {
-      const logs = db.prepare(`
-        SELECT * FROM timelogs 
-        WHERE staff_id = ? AND date LIKE ? AND clock_out IS NOT NULL
-      `).all(s.id, `${month}%`) as any[];
-
-      let totalMinutes = 0;
-      logs.forEach(l => {
-        const [inH, inM] = l.clock_in.split(':').map(Number);
-        const [outH, outM] = l.clock_out.split(':').map(Number);
-        const worked = (outH * 60 + outM) - (inH * 60 + inM) - (l.break_minutes || 0);
-        if (worked > 0) totalMinutes += worked;
-      });
-
-      const adjustments = db.prepare(`
-        SELECT COALESCE(SUM(hours), 0) as total_adj FROM overtime_adjustments
-        WHERE staff_id = ? AND date LIKE ?
-      `).get(s.id, `${month}%`) as { total_adj: number };
-
-      const actualHours = parseFloat((totalMinutes / 60).toFixed(2));
-      const targetMonthlyHours = parseFloat((s.weekly_hours * 4.33).toFixed(2));
-      const overtime = parseFloat((actualHours + adjustments.total_adj - targetMonthlyHours).toFixed(2));
+      const hours = monthHours(s, month);
 
       return {
         staff_id: s.id,
@@ -1213,11 +1283,10 @@ app.get('/api/time-overview', (req, res) => {
         avatar: s.avatar,
         color: s.color,
         weekly_hours: s.weekly_hours,
-        target_month_hours: targetMonthlyHours,
-        actual_hours: actualHours,
-        adjustments_hours: adjustments.total_adj,
-        overtime_hours: overtime,
-        remaining_vacation: s.annual_vacation_days || 30
+        ...hours,
+        month_overtime_hours: hours.overtime_hours,
+        overtime_hours: overtimeBalance(s, month),
+        remaining_vacation: remainingVacationDays(s, month.slice(0, 4))
       };
     });
 
@@ -1236,7 +1305,7 @@ app.post('/api/staff/:id/overtime-adjustment', (req, res) => {
 
     const adjId = 'adj_' + Date.now();
     const effectiveDate = date || format(new Date(), 'yyyy-MM-dd');
-    const createdBy = 'Sabine Weber (Leitung)';
+    const createdBy = 'Einrichtungsleitung';
 
     db.prepare(`
       INSERT INTO overtime_adjustments (id, staff_id, hours, reason, date, created_by, created_at)
@@ -1307,12 +1376,12 @@ export function queueStaffNotification(staffId: string, changeType: string, summ
       // SOFORT-BENACHRICHTIGUNG: Direct delivery to staff_audit_log without waiting 30 minutes
       const logId = 'log_urgent_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       const isCancellation = changeType === 'SHIFT_CANCELLED';
-      const urgentTitle = `🚨 SOFORT (<24h): ${isCancellation ? 'Schicht abgesagt' : 'Kurzfristige Schichtänderung'}`;
+      const urgentTitle = `SOFORT (<24h): ${isCancellation ? 'Schicht abgesagt' : 'Kurzfristige Schichtänderung'}`;
       const urgentDesc = `Sofortige Benachrichtigung (Dienst betrifft die nächsten 24 Stunden):\n${summary}`;
 
       db.prepare(`
         INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
-        VALUES (?, ?, 'SHIFT_CHANGE', ?, ?, 'Sabine Weber (Leitung - Sofortbenachrichtigung)', ?, 0)
+        VALUES (?, ?, 'SHIFT_CHANGE', ?, ?, 'Einrichtungsleitung (Sofortbenachrichtigung)', ?, 0)
       `).run(logId, staffId, urgentTitle, urgentDesc, now.toISOString());
 
       // Save into notification_queue as SENT immediately for full history and auditability
@@ -1399,7 +1468,7 @@ export function flushNotificationQueue(forceAll: boolean = false) {
       const logId = 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       db.prepare(`
         INSERT INTO staff_audit_log (id, staff_id, category, title, description, changed_by, created_at, is_read)
-        VALUES (?, ?, 'SHIFT_CHANGE', ?, ?, 'Sabine Weber (Leitung - Gebündelt)', ?, 0)
+        VALUES (?, ?, 'SHIFT_CHANGE', ?, ?, 'Einrichtungsleitung (Gebündelt)', ?, 0)
       `).run(logId, item.staff_id, logTitle, logDesc, new Date().toISOString());
 
       db.prepare("UPDATE notification_queue SET status = 'SENT', sent_at = ? WHERE id = ?").run(new Date().toISOString(), item.id);
@@ -1413,6 +1482,29 @@ export function flushNotificationQueue(forceAll: boolean = false) {
   }
 }
 
+// Viertelstunden von 7:00 bis 17:45, als Minuten seit Mitternacht.
+const OPEN_SLOTS = Array.from({ length: 44 }, (_, i) => 7 * 60 + i * 15);
+const slotTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+const quarterCounts = (groupId: string): Record<number, number> => Object.fromEntries(
+  (db.prepare('SELECT slot, child_count FROM group_quarter_children WHERE group_id = ?').all(groupId) as any[])
+    .map(r => [r.slot, r.child_count])
+);
+
+const excursionFor = (groupId: string, date: string) =>
+  db.prepare('SELECT staff_count FROM excursions WHERE group_id = ? AND date = ?').get(groupId, date) as { staff_count: number } | undefined;
+
+// Ohne Kinderzahlen gilt ein Wandertag von 8 bis 16 Uhr.
+const excursionCovers = (plan: Record<number, number>, slot: number) =>
+  Object.keys(plan).length > 0 ? (plan[slot] ?? 0) > 0 : slot >= 480 && slot < 960;
+
+// Ein Standardtag pro Gruppe; an Wochenenden und Schließtagen sind keine Kinder da.
+function plannedChildren(groupId: string, date: string): Record<number, number> {
+  const weekday = parseISO(date).getDay();
+  const closed = db.prepare('SELECT 1 FROM kita_closures WHERE date = ?').get(date);
+  return weekday === 0 || weekday === 6 || closed ? {} : quarterCounts(groupId);
+}
+
 export function runAutopilotAnalysis() {
   try {
     const setting = db.prepare("SELECT value FROM settings WHERE key = 'autopilot_enabled'").get() as { value: string } | undefined;
@@ -1421,6 +1513,7 @@ export function runAutopilotAnalysis() {
     }
 
     const today = format(new Date(), 'yyyy-MM-dd');
+    generateRoster(today, today);
     const groups = db.prepare('SELECT * FROM groups').all() as any[];
     const proposals: any[] = [];
 
@@ -1428,7 +1521,9 @@ export function runAutopilotAnalysis() {
       const shifts = db.prepare("SELECT * FROM shifts WHERE group_id = ? AND date = ? AND status = 'CONFIRMED'").all(group.id, today) as any[];
       const staffCount = shifts.length;
       const targetRatio = group.target_ratio || 8.0;
-      const childCount = group.child_count || 20;
+      const plannedCounts = Object.values(plannedChildren(group.id, today));
+      if (plannedCounts.length === 0) continue;
+      const childCount = Math.max(...plannedCounts);
       const requiredStaff = Math.max(1, Math.ceil(childCount / targetRatio));
 
       const cancelledShifts = db.prepare(`
@@ -1453,7 +1548,7 @@ export function runAutopilotAnalysis() {
         );
 
         const candidates = (db.prepare("SELECT * FROM staff WHERE is_active = 1").all() as any[])
-          .filter(s => !busyStaffIds.has(s.id) && !absentStaffIds.has(s.id))
+          .filter(s => !busyStaffIds.has(s.id) && !absentStaffIds.has(s.id) && availabilityIssues(s, today, '08:00', '16:30', 30).length === 0)
           .map(s => {
             const skills: string[] = JSON.parse(s.skills || '[]');
             const matchesSkills = requiredSkills.every(req => skills.includes(req));
@@ -1611,6 +1706,9 @@ app.post('/api/autopilot/proposals/:id/accept', (req, res) => {
     const proposal = db.prepare('SELECT * FROM autopilot_proposals WHERE id = ?').get(id) as any;
     if (!proposal) return res.status(404).json({ error: 'Vorschlag nicht gefunden' });
     if (proposal.status !== 'PENDING') return res.status(400).json({ error: 'Vorschlag bereits bearbeitet' });
+    if (proposal.date < ymd(new Date())) return res.status(409).json({ error: 'Dieser Vorschlag ist veraltet, der Tag ist abgeschlossen.' });
+    const proposalStart = proposal.date === ymd(new Date()) && proposal.start_time <= nowHHmm() ? nowHHmm() : proposal.start_time;
+    if (proposalStart >= proposal.end_time) return res.status(409).json({ error: 'Die Zeit dieses Vorschlags ist schon vorbei.' });
 
     const shiftId = 'shift_auto_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
     db.prepare(`
@@ -1618,7 +1716,7 @@ app.post('/api/autopilot/proposals/:id/accept', (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', 'Auto-Pilot Vertretung')
     `).run(
       shiftId, proposal.target_staff_id, proposal.target_group_id, proposal.date,
-      proposal.start_time, proposal.end_time, proposal.break_minutes
+      proposalStart, proposal.end_time, proposal.break_minutes
     );
 
     const group = db.prepare('SELECT name FROM groups WHERE id = ?').get(proposal.target_group_id) as any;
@@ -1707,8 +1805,8 @@ app.get('/api/groups', (req, res) => {
 app.post('/api/groups', (req, res) => {
   try {
     const { name, type, child_count, target_ratio, min_fachkraft_percent, color, required_skills, policy_id } = req.body;
-    if (!name || child_count === undefined) {
-      return res.status(400).json({ error: 'Name und Kinderanzahl sind erforderlich' });
+    if (!name) {
+      return res.status(400).json({ error: 'Name ist erforderlich' });
     }
     const id = 'g_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
     const grpType = type || 'UE3';
@@ -1721,13 +1819,13 @@ app.post('/api/groups', (req, res) => {
     db.prepare(`
       INSERT INTO groups (id, name, type, child_count, target_ratio, min_fachkraft_percent, required_skills, color, policy_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, name, grpType, parseInt(child_count, 10), parseFloat(ratio), parseFloat(minFachkraft), skills, grpColor, polId);
+    `).run(id, name, grpType, parseInt(child_count ?? 0, 10), parseFloat(ratio), parseFloat(minFachkraft), skills, grpColor, polId);
 
     res.status(201).json({
       id,
       name,
       type: grpType,
-      child_count: parseInt(child_count, 10),
+      child_count: parseInt(child_count ?? 0, 10),
       target_ratio: parseFloat(ratio),
       min_fachkraft_percent: parseFloat(minFachkraft),
       required_skills: JSON.parse(skills),
@@ -1757,7 +1855,10 @@ app.put('/api/groups/:id', (req, res) => {
     const grpColor = color ?? existing.color;
     const skills = required_skills ? JSON.stringify(required_skills) : existing.required_skills;
     const polId = policy_id ?? existing.policy_id ?? 'pol_ue3';
+    if (!(ratio >= 0.5 && ratio <= 30)) return res.status(400).json({ error: 'Der Schlüssel muss zwischen 0,5 und 30 liegen' });
+    if (!(minFachkraft >= 0 && minFachkraft <= 1)) return res.status(400).json({ error: 'Die Fachkraftquote muss zwischen 0 und 100 % liegen' });
 
+    db.prepare('UPDATE ratio_settings SET target_ratio = ?, min_qualification_quote = ? WHERE group_id = ?').run(ratio, minFachkraft, id);
     db.prepare(`
       UPDATE groups
       SET name = ?, type = ?, child_count = ?, target_ratio = ?, min_fachkraft_percent = ?, color = ?, required_skills = ?, policy_id = ?
@@ -1901,7 +2002,7 @@ app.post('/api/children', (req, res) => {
     const {
       group_id, first_name, last_name, birth_date, gender, photo_url,
       care_hours = 35, contract_start = format(new Date(), 'yyyy-MM-dd'), contract_end = null,
-      allergies = [], dietary_needs = null, emergency_instructions = null, measles_vaccinated = 1,
+      allergies = [], dietary_needs = null, emergency_instructions = null, measles_vaccinated = 0,
       doctor_name = null, doctor_phone = null
     } = req.body;
 
@@ -2305,7 +2406,7 @@ app.post('/api/daily-logs', (req, res) => {
 });
 
 // ==========================================
-// LAGE.APP PARITY: ELTERNINITIATIVE & VEREIN
+// ELTERNINITIATIVE & VEREIN
 // ==========================================
 
 // 1. Vorstands-Verwaltung & 1-Klick-Amtsübergabe (e.V.)
@@ -2971,7 +3072,10 @@ app.post('/api/waitlist/:id/accept-and-enroll', (req, res) => {
     const app = db.prepare('SELECT * FROM waitlist_applications WHERE id = ?').get(id) as any;
     if (!app) return res.status(404).json({ error: 'Bewerbung nicht gefunden' });
 
-    const targetGroupId = group_id || (app.desired_group_type === 'U3' ? 'g_u3_maeuse' : 'g_ue3_sonne');
+    const matchingGroup = (db.prepare('SELECT id FROM groups WHERE type = ? LIMIT 1').get(app.desired_group_type)
+      ?? db.prepare('SELECT id FROM groups LIMIT 1').get()) as { id: string } | undefined;
+    const targetGroupId = group_id || matchingGroup?.id;
+    if (!targetGroupId) return res.status(400).json({ error: 'Bitte zuerst eine Gruppe anlegen.' });
     const childId = `c_enrolled_${Date.now()}`;
     const now = new Date().toISOString();
 
@@ -2982,7 +3086,7 @@ app.post('/api/waitlist/:id/accept-and-enroll', (req, res) => {
 
     db.prepare(`
       INSERT INTO child_health_records (child_id, allergies, dietary_needs, medication_plan, emergency_instructions, measles_vaccinated, doctor_name)
-      VALUES (?, '[]', 'Mischkost', NULL, NULL, 1, 'Kinderarztpraxis')
+      VALUES (?, '[]', 'Mischkost', NULL, NULL, 0, 'Kinderarztpraxis')
     `).run(childId);
 
     // Wiederverwendung bestehender Eltern-Account falls E-Mail schon vorhanden (z.B. Geschwisterkind)
@@ -2999,14 +3103,14 @@ app.post('/api/waitlist/:id/accept-and-enroll', (req, res) => {
 
     db.prepare(`
       INSERT OR REPLACE INTO parent_child_links (parent_id, child_id, is_primary_contact, photo_consent)
-      VALUES (?, ?, 1, 1)
+      VALUES (?, ?, 1, 0)
     `).run(parentId, childId);
 
     db.prepare("UPDATE waitlist_applications SET status = 'ACCEPTED' WHERE id = ?").run(id);
 
     res.json({
       success: true,
-      message: `🎉 Platzzusage erfolgreich! ${app.child_first_name} ${app.child_last_name} wurde in Gruppe '${targetGroupId}' aufgenommen und Eltern-Account (${app.parent_email}) wurde angelegt.`,
+      message: `Platzzusage erfolgreich! ${app.child_first_name} ${app.child_last_name} wurde in Gruppe '${targetGroupId}' aufgenommen und Eltern-Account (${app.parent_email}) wurde angelegt.`,
       child_id: childId,
       parent_id: parentId
     });
@@ -3016,7 +3120,7 @@ app.post('/api/waitlist/:id/accept-and-enroll', (req, res) => {
 });
 
 // ==========================================
-// 8. ABRECHNUNG, ESSENSGELD & SEPA (MODUL E)
+// 8. ABRECHNUNG & ESSENSGELD
 // ==========================================
 
 app.get('/api/billing/invoices', (req, res) => {
@@ -3088,107 +3192,12 @@ app.post('/api/billing/generate-month', (req, res) => {
       insertInv.run(
         invId, c.parent_id, c.id, month, c.care_hours,
         baseFee, mealFee, daysCounted, 0.0, totalAmount,
-        'DE27100777770345678901', 'DEUTDEDBFXX', `MANDAT-${c.first_name.toUpperCase()}-${month}`, now
+        '', '', '', now
       );
       generatedCount++;
     });
 
     res.json({ success: true, message: `Monatsabrechnung für ${month} erfolgreich generiert (${generatedCount} Rechnungen).` });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/billing/export-sepa-xml', (req, res) => {
-  try {
-    const { month = format(new Date(), 'yyyy-MM') } = req.query;
-    const invoices = db.prepare(`
-      SELECT bi.*, pa.name as parent_name, c.first_name as child_first_name, c.last_name as child_last_name
-      FROM billing_invoices bi
-      JOIN parent_accounts pa ON bi.parent_id = pa.id
-      JOIN children c ON bi.child_id = c.id
-      WHERE bi.month = ?
-    `).all(month) as any[];
-
-    const totalSum = invoices.reduce((sum, inv) => sum + inv.total_amount, 0).toFixed(2);
-    const executionDate = format(addDays(new Date(), 5), 'yyyy-MM-dd');
-    const msgId = `KITA-SEPA-${month}-${Date.now()}`;
-
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">
-  <CstmrDrctDbtInitn>
-    <GrpHdr>
-      <MsgId>${msgId}</MsgId>
-      <CreDtTm>${new Date().toISOString()}</CreDtTm>
-      <NbOfTxs>${invoices.length}</NbOfTxs>
-      <CtrlSum>${totalSum}</CtrlSum>
-      <InitgPty>
-        <Nm>Kita Sonnenschein e.V.</Nm>
-      </InitgPty>
-    </GrpHdr>
-    <PmtInf>
-      <PmtInfId>PMT-${month}-01</PmtInfId>
-      <PmtMtd>DD</PmtMtd>
-      <NbOfTxs>${invoices.length}</NbOfTxs>
-      <CtrlSum>${totalSum}</CtrlSum>
-      <PmtTpInf>
-        <SvcLvl><Cd>SEPA</Cd></SvcLvl>
-        <LclInstrm><Cd>CORE</Cd></LclInstrm>
-        <SeqTp>RCUR</SeqTp>
-      </PmtTpInf>
-      <ReqdColltnDt>${executionDate}</ReqdColltnDt>
-      <Cdtr>
-        <Nm>Kita Sonnenschein e.V.</Nm>
-      </Cdtr>
-      <CdtrAcct>
-        <Id><IBAN>DE89370400440532013000</IBAN></Id>
-      </CdtrAcct>
-      <CdtrAgt>
-        <FinInstnId><BIC>COBADEFFXXX</BIC></FinInstnId>
-      </CdtrAgt>
-      <CdtrSchmeId>
-        <Id>
-          <PrvtId>
-            <Othr>
-              <Id>DE98ZZZ09999999999</Id>
-              <SchmeNm><Prtry>SEPA</Prtry></SchmeNm>
-            </Othr>
-          </PrvtId>
-        </Id>
-      </CdtrSchmeId>
-${invoices.map((inv) => `      <DrctDbtTxInf>
-        <PmtId>
-          <EndToEndId>${inv.id}</EndToEndId>
-        </PmtId>
-        <InstdAmt Ccy="EUR">${inv.total_amount.toFixed(2)}</InstdAmt>
-        <DrctDbtTx>
-          <MndtRltdInf>
-            <MndtId>${inv.mandate_ref}</MndtId>
-            <DtOfSgntr>2026-01-15</DtOfSgntr>
-          </MndtRltdInf>
-        </DrctDbtTx>
-        <DbtrAgt>
-          <FinInstnId><BIC>${inv.bic}</BIC></FinInstnId>
-        </DbtrAgt>
-        <Dbtr>
-          <Nm>${inv.parent_name}</Nm>
-        </Dbtr>
-        <DbtrAcct>
-          <Id><IBAN>${inv.iban}</IBAN></Id>
-        </DbtrAcct>
-        <RmtInf>
-          <Ustrd>Kita-Gebuehren und Essensgeld ${inv.child_first_name} ${inv.child_last_name} ${month}</Ustrd>
-        </RmtInf>
-      </DrctDbtTxInf>`).join('\n')}
-    </PmtInf>
-  </CstmrDrctDbtInitn>
-</Document>`;
-
-    db.prepare("UPDATE billing_invoices SET status = 'SEPA_EXPORTED' WHERE month = ?").run(month);
-
-    res.setHeader('Content-Type', 'application/xml');
-    res.setHeader('Content-Disposition', `attachment; filename="SEPA_Lastschrift_${month}.xml"`);
-    res.send(xml);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3227,7 +3236,7 @@ app.get('/api/reports/youth-office', (req, res) => {
 
     res.json({
       reporting_date: format(new Date(), 'yyyy-MM-dd'),
-      kita_name: 'Kita Sonnenschein e.V.',
+      kita_name: 'Meine Kita',
       betriebserlaubnis_plaetze: 65,
       belegte_plaetze: allChildren.length,
       auslastung_percent: Math.round((allChildren.length / 65) * 100),
@@ -3384,6 +3393,16 @@ app.post('/api/photo-albums', (req, res) => {
 // RATIO SETTINGS & DYNAMIC CONFIGURATION
 // ==========================================
 
+// groups ist die maßgebliche Quelle; ratio_settings hält nur noch Toleranzen und die ausgeblendeten Vorlagen.
+function syncGroupRatios() {
+  db.prepare(`
+    UPDATE groups SET
+      target_ratio = (SELECT target_ratio FROM ratio_settings WHERE group_id = groups.id),
+      min_fachkraft_percent = (SELECT min_qualification_quote FROM ratio_settings WHERE group_id = groups.id)
+    WHERE id IN (SELECT group_id FROM ratio_settings WHERE group_id IS NOT NULL)
+  `).run();
+}
+
 app.get('/api/ratio-settings', (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM ratio_settings').all();
@@ -3420,6 +3439,7 @@ app.put('/api/ratio-settings', (req, res) => {
       id, group_id, target_ratio, warning_threshold_percent, critical_threshold_percent,
       two_person_rule ? 1 : 0, core_time_start, core_time_end, min_qualification_quote, bundesland_preset
     );
+    syncGroupRatios();
 
     res.json({ success: true, message: 'Betreuungsschlüssel-Einstellungen gespeichert' });
   } catch (err: any) {
@@ -3459,6 +3479,7 @@ app.post('/api/ratio-settings/apply-preset', (req, res) => {
         target_ratio = ?, min_qualification_quote = ?, bundesland_preset = ?
       WHERE group_id IN ('g_ue3_sonne', 'g_ue3_wald') OR group_id IS NULL
     `).run(ue3Ratio, ue3Fachkraft, preset);
+    syncGroupRatios();
 
     res.json({ success: true, preset, u3Ratio, ue3Ratio, message: `Bundesland-Vorlage ${preset} erfolgreich angewendet.` });
   } catch (err: any) {
@@ -3470,9 +3491,56 @@ app.post('/api/ratio-settings/apply-preset', (req, res) => {
 // DYNAMIC RATIO RADAR & AUTO-BALANCING
 // ==========================================
 
+app.get('/api/hourly-children', (req, res) => {
+  try {
+    const groups = db.prepare('SELECT id FROM groups').all() as any[];
+    res.json({ slots: OPEN_SLOTS, groups: Object.fromEntries(groups.map(g => [g.id, quarterCounts(g.id)])) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/groups/:id/hourly-children/:slot', (req, res) => {
+  try {
+    const groupId = req.params.id;
+    const slot = Number(req.params.slot);
+    const childCount = Number(req.body.child_count);
+    if (!db.prepare('SELECT 1 FROM groups WHERE id = ?').get(groupId)) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+    if (!OPEN_SLOTS.includes(slot)) return res.status(400).json({ error: 'Ungültige Uhrzeit' });
+    if (!Number.isInteger(childCount) || childCount < 0 || childCount > 200) {
+      return res.status(400).json({ error: 'Die Kinderzahl muss zwischen 0 und 200 liegen' });
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO group_quarter_children (group_id, slot, child_count) VALUES (?, ?, ?)
+      ON CONFLICT(group_id, slot) DO UPDATE SET child_count = excluded.child_count
+    `);
+    db.transaction(() => {
+      // Erster Wert: alle Zeiten. Volle Stunde: deren vier Viertelstunden. Sonst nur diese Viertelstunde.
+      const isFirstValue = Object.keys(quarterCounts(groupId)).length === 0;
+      const targets = isFirstValue ? OPEN_SLOTS : slot % 60 === 0 ? [slot, slot + 15, slot + 30, slot + 45] : [slot];
+      for (const t of targets) upsert.run(groupId, t, childCount);
+    })();
+
+    res.json({ success: true, counts: quarterCounts(groupId) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/groups/:id/hourly-children', (req, res) => {
+  try {
+    db.prepare('DELETE FROM group_quarter_children WHERE group_id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/ratio-status', (req, res) => {
   try {
     const date = (req.query.date as string) || format(new Date(), 'yyyy-MM-dd');
+    generateRoster(date, date);
     const groups = db.prepare('SELECT * FROM groups').all() as any[];
 
     // Check facility-wide First-Aid requirement
@@ -3514,43 +3582,39 @@ app.get('/api/ratio-status', (req, res) => {
         secondary_roles: JSON.parse(s.secondary_roles || '[]')
       }));
 
-      const totalStaff = activeShifts.length;
-      const fachkraefte = activeShifts.filter((s: any) => s.is_fachkraft === 1).length;
+      const plan = plannedChildren(group.id, date);
+      const slots = OPEN_SLOTS.map(minute => {
+        const from = slotTime(minute);
+        const to = slotTime(minute + 15);
+        const staffNow = activeShifts.filter((s: any) => s.start_time < to && s.end_time > from);
+        return {
+          minute,
+          children: plan[minute] ?? 0,
+          staff: staffNow.length,
+          fachkraefte: staffNow.filter((s: any) => s.is_fachkraft === 1).length
+        };
+      });
+
+      // Bewertet wird die Viertelstunde mit dem schlechtesten Schlüssel.
+      const load = (h: typeof slots[number]) => h.children === 0 ? 0 : h.staff === 0 ? Infinity : h.children / h.staff;
+      const worst = slots.reduce((a, b) => load(b) > load(a) ? b : a);
+      const at = `um ${slotTime(worst.minute)} Uhr`;
+
+      const excursion = excursionFor(group.id, date);
+      const tripStaff = excursion ? Math.min(...slots.filter(s => excursionCovers(plan, s.minute)).map(s => s.staff)) : Infinity;
+
+      const totalStaff = worst.staff;
+      const fachkraefte = worst.fachkraefte;
       const ergaenzungskraefte = totalStaff - fachkraefte;
+      const effectiveChildren = worst.children;
 
-      // Children numbers (Enrolled vs. Absent vs. Present)
-      const enrolledChildRow = db.prepare('SELECT COUNT(*) as c FROM children WHERE group_id = ? AND active = 1').get(group.id) as { c: number };
-      const enrolledCount = enrolledChildRow?.c > 0 ? enrolledChildRow.c : group.child_count;
-
-      const attendanceRows = db.prepare('SELECT status FROM child_attendance WHERE group_id = ? AND date = ?').all(group.id, date) as { status: string }[];
-      let presentCount = 0;
-      let absentSickCount = 0;
-      let absentOtherCount = 0;
-
-      if (attendanceRows.length > 0) {
-        attendanceRows.forEach(a => {
-          if (a.status === 'present') presentCount++;
-          else if (a.status === 'absent_sick') absentSickCount++;
-          else absentOtherCount++;
-        });
-      }
-
-      const totalAbsent = absentSickCount + absentOtherCount;
-      // Real effective children in group today
-      const effectiveChildren = attendanceRows.length > 0 
-        ? (presentCount > 0 ? presentCount : Math.max(0, enrolledCount - totalAbsent))
-        : enrolledCount;
-
-      const targetRatio = groupSetting.target_ratio || group.target_ratio;
+      const targetRatio = group.target_ratio;
       const warningThreshold = groupSetting.warning_threshold_percent || 15.0;
       const criticalThreshold = groupSetting.critical_threshold_percent || 25.0;
-      const minFachkraft = groupSetting.min_qualification_quote || group.min_fachkraft_percent;
+      const minFachkraft = group.min_fachkraft_percent;
       const twoPersonRule = groupSetting.two_person_rule !== 0;
 
-      // Actual ratio using real present children
       const actualRatio = totalStaff > 0 ? parseFloat((effectiveChildren / totalStaff).toFixed(2)) : 99;
-      // Static ratio if all enrolled were present
-      const staticRatio = totalStaff > 0 ? parseFloat((enrolledCount / totalStaff).toFixed(2)) : 99;
       const fachkraftPercent = totalStaff > 0 ? fachkraefte / totalStaff : 0;
 
       // Skill validation
@@ -3560,40 +3624,21 @@ app.get('/api/ratio-status', (req, res) => {
 
       let status = 'OPTIMAL';
       let message = 'Betreuungsschlüssel & personelle Skills erfüllt.';
-      const autoBalancing = {
-        active: false,
-        absent_children: totalAbsent,
-        absent_sick_children: absentSickCount,
-        enrolled_children: enrolledCount,
-        effective_children: effectiveChildren,
-        static_ratio: staticRatio,
-        dynamic_ratio: actualRatio,
-        saved_emergency: false
-      };
-
-      // Check Auto-Balancing condition:
-      // If static ratio exceeds target (would normally trigger alarm!), BUT dynamic ratio with absent kids is <= target + warning threshold
-      const wouldBeCriticalStatically = staticRatio > targetRatio;
-      const isDynamicCompliant = actualRatio <= targetRatio * (1 + warningThreshold / 100);
-
-      if (totalStaff === 0 && effectiveChildren > 0) {
+      if (excursion && tripStaff < excursion.staff_count) {
         status = 'CRITICAL';
-        message = 'AKUTER NOTSTAND: Keine Aufsichtsperson in der Gruppe!';
+        message = `Wandertag: nur ${tripStaff} von ${excursion.staff_count} Betreuenden eingeplant.`;
+      } else if (totalStaff === 0 && effectiveChildren > 0) {
+        status = 'CRITICAL';
+        message = `Keine Aufsichtsperson ${at}!`;
       } else if (effectiveChildren === 0) {
         status = 'OPTIMAL';
-        message = 'Keine Kinder in dieser Gruppe anwesend.';
-      } else if (wouldBeCriticalStatically && isDynamicCompliant && totalAbsent > 0) {
-        // AUTO-BALANCING SAVES THE DAY!
-        status = 'BALANCED_OK';
-        autoBalancing.active = true;
-        autoBalancing.saved_emergency = true;
-        message = `Auto-Balancing aktiv: ${totalAbsent} Kinder abgemeldet. Real-Schlüssel 1:${actualRatio} (Soll 1:${targetRatio}) ist gesetzeskonform! Keine Schicht-Neubesetzung nötig.`;
+        message = 'Für diesen Tag sind keine Kinder eingetragen.';
       } else if (actualRatio > targetRatio * (1 + criticalThreshold / 100)) {
         status = 'CRITICAL';
-        message = `Unterbesetzung: 1:${actualRatio} (Gesetzliches Limit: 1:${targetRatio})`;
+        message = `Unterbesetzung ${at}: 1:${actualRatio} (Limit: 1:${targetRatio})`;
       } else if (actualRatio > targetRatio) {
         status = 'WARNING';
-        message = `Leichte Überschreitung: 1:${actualRatio} (Toleranzbereich, Soll: 1:${targetRatio})`;
+        message = `Leichte Überschreitung ${at}: 1:${actualRatio} (Soll: 1:${targetRatio})`;
       } else if (twoPersonRule && totalStaff < 2 && effectiveChildren > 3) {
         // Two-person supervision rule warning
         status = 'WARNING';
@@ -3616,13 +3661,12 @@ app.get('/api/ratio-status', (req, res) => {
         group_id: group.id,
         group_name: group.name,
         group_type: group.type,
-        child_count: group.child_count,
-        enrolled_children: enrolledCount,
+        child_count: effectiveChildren,
         effective_children: effectiveChildren,
-        absent_children: totalAbsent,
+        worst_time: slotTime(worst.minute),
+        slots,
         target_ratio: targetRatio,
         actual_ratio: actualRatio,
-        static_ratio: staticRatio,
         min_fachkraft_percent: minFachkraft,
         actual_fachkraft_percent: fachkraftPercent,
         required_skills: requiredSkills,
@@ -3632,7 +3676,6 @@ app.get('/api/ratio-status', (req, res) => {
         ergaenzungskraefte,
         status,
         message,
-        auto_balancing: autoBalancing,
         staff: activeShifts
       };
     });
@@ -3679,6 +3722,8 @@ app.get('/api/emergency/suggestions', (req, res) => {
       if (staff.role === 'SPRINGER') score += 30;
       if (staff.role === 'LEITUNG') score += 15; // Leitung can spring in emergency
       if (isAlreadyWorking) score -= 50; // Already scheduled somewhere
+      const unavailable = availabilityIssues(staff, targetDate, '08:00', '15:30', 30);
+      if (unavailable.length > 0) score -= 100;
 
       let note = '';
       if (staff.role === 'LEITUNG') {
@@ -3690,6 +3735,8 @@ app.get('/api/emergency/suggestions', (req, res) => {
       } else {
         note = 'Ergänzungskraft zur reinen Kopfzahl-Unterstützung (keine Gruppenleitung).';
       }
+
+      if (unavailable.length > 0) note = `Nicht verfügbar: ${unavailable.map(i => i.text).join(', ')}.`;
 
       return {
         staff_id: staff.id,
@@ -3780,9 +3827,481 @@ app.delete('/api/staff-wishes/:id', (req, res) => {
   }
 });
 
+// Einsatzplan aus dem Dienstplan: jeder Tag wird einmal erzeugt, danach bleiben Änderungen dort erhalten.
+// Vergangene Tage werden nie nachträglich gefüllt.
+function generateRoster(start: string, end: string) {
+  const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (!isDate(start) || !isDate(end)) return;
+  const today = ymd(new Date());
+  const from = start > today ? start : today;
+  const limit = ymd(addDays(parseISO(from), 62));
+  const to = end < limit ? end : limit;
+  if (from > to) return;
+
+  if (!db.prepare('SELECT 1 FROM standard_shifts LIMIT 1').get()) return;
+
+  const isGenerated = db.prepare('SELECT 1 FROM roster_generated_days WHERE date = ?');
+  db.transaction(() => {
+    for (const date of workdaysBetween(from, to)) {
+      if (isGenerated.get(date)) continue;
+      insertStandardShifts(date);
+      db.prepare('INSERT OR IGNORE INTO roster_generated_days (date) VALUES (?)').run(date);
+    }
+  })();
+}
+
+function insertStandardShifts(date: string, startsAfter = '') {
+  const weekday = parseISO(date).getDay();
+  const standard = db.prepare(`
+    SELECT ss.*, st.availability_rules FROM standard_shifts ss JOIN staff st ON ss.staff_id = st.id
+    WHERE st.is_active = 1 AND ss.weekday = ?
+  `).all(weekday) as any[];
+
+  const hasShift = db.prepare('SELECT 1 FROM shifts WHERE staff_id = ? AND date = ?');
+  const insertShift = db.prepare(`
+    INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status, warning, source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?, 'STANDARD')
+  `);
+
+  for (const s of standard) {
+    if (s.start_time <= startsAfter || hasShift.get(s.staff_id, date) || isOnApprovedAbsence(s.staff_id, date)) continue;
+    const person = { id: s.staff_id, availability_rules: s.availability_rules };
+    if (availabilityIssues(person, date, s.start_time, s.end_time, s.break_minutes).some(i => i.hard)) continue;
+    const { warning } = validateShiftArbZG({ ...s, date });
+    insertShift.run(`shift_std_${date}_${s.staff_id}`, s.staff_id, s.group_id, date, s.start_time, s.end_time, s.break_minutes, warning);
+  }
+}
+
+const isOnApprovedAbsence = (staffId: string, date: string) =>
+  !!db.prepare("SELECT 1 FROM absences WHERE staff_id = ? AND ? BETWEEN start_date AND end_date AND status = 'APPROVED'").get(staffId, date);
+
+const nowHHmm = () => format(new Date(), 'HH:mm');
+
+// Vergangene Tage sind abgeschlossen, heute lässt sich nur noch die Zukunft ändern.
+function newShiftLock(date: string, start: string): string | null {
+  const today = ymd(new Date());
+  if (date < today) return 'Vergangene Tage sind abgeschlossen und können nicht mehr geändert werden.';
+  if (date === today && start <= nowHHmm()) return 'Heute lassen sich nur noch Zeiten in der Zukunft planen.';
+  return null;
+}
+
+function cancelUpcomingShifts(staffId: string, start: string, end: string) {
+  const today = ymd(new Date());
+  db.prepare(`
+    UPDATE shifts SET status = 'CANCELLED'
+    WHERE staff_id = ? AND date BETWEEN ? AND ? AND status = 'CONFIRMED' AND (date > ? OR (date = ? AND end_time > ?))
+  `).run(staffId, start, end, today, today, nowHHmm());
+}
+
+function findSubstitute(group: any, date: string, startMinutes: number, endMinutes: number, requiredSkills: string[]) {
+  const day = parseISO(date);
+  const weekStart = ymd(startOfISOWeek(day));
+  const weekEnd = ymd(endOfISOWeek(day));
+  const staff = db.prepare('SELECT * FROM staff WHERE is_active = 1').all() as any[];
+  const busy = new Set((db.prepare("SELECT staff_id FROM shifts WHERE date = ? AND status = 'CONFIRMED'").all(date) as any[]).map(r => r.staff_id));
+
+  const candidates: { staff: any; start: string; end: string; breakMinutes: number; score: number }[] = [];
+  for (const s of staff) {
+    if (busy.has(s.id) || isOnApprovedAbsence(s.id, date)) continue;
+
+    // Das Fenster schrumpft auf das, was die Person laut ihren Regeln leisten kann.
+    let from = startMinutes;
+    let to = Math.min(endMinutes, startMinutes + 8 * 60);
+    for (const rule of parseRules(s.availability_rules)) {
+      if (rule.days?.length && !rule.days.includes(day.getDay())) continue;
+      if (rule.type === 'EARLIEST') from = Math.max(from, minutesBetween('00:00', String(rule.value)));
+      if (rule.type === 'LATEST') to = Math.min(to, minutesBetween('00:00', String(rule.value)));
+    }
+    for (const rule of parseRules(s.availability_rules)) {
+      if (rule.type === 'MAX_HOURS_DAY' && (!rule.days?.length || rule.days.includes(day.getDay()))) to = Math.min(to, from + Number(rule.value) * 60);
+    }
+    if (to - from < 60) continue;
+
+    const start = slotTime(from);
+    const end = slotTime(to);
+    const breakMinutes = to - from > 360 ? 30 : 0;
+    if (validateShiftArbZG({ staff_id: s.id, date, start_time: start, end_time: end, break_minutes: breakMinutes }).warnings.length > 0) continue;
+
+    const planned = db.prepare(`
+      SELECT COALESCE(SUM((strftime('%s', '2000-01-01 ' || end_time) - strftime('%s', '2000-01-01 ' || start_time)) / 60 - break_minutes), 0) as m
+      FROM shifts WHERE staff_id = ? AND date BETWEEN ? AND ? AND status = 'CONFIRMED'
+    `).get(s.id, weekStart, weekEnd) as { m: number };
+    if (planned.m + to - from - breakMinutes > s.weekly_hours * 60) continue;
+
+    const skills: string[] = JSON.parse(s.skills || '[]');
+    let score = (to - from) / 60;
+    if (requiredSkills.every(r => skills.includes(r))) score += 40;
+    if (s.can_spring === 1) score += 30;
+    if (s.role === 'SPRINGER') score += 30;
+    if (s.is_fachkraft === 1) score += 10;
+    if (s.role === 'LEITUNG') score -= 40;
+    candidates.push({ staff: s, start, end, breakMinutes, score });
+  }
+  return candidates.sort((a, b) => b.score - a.score)[0] ?? null;
+}
+
+// Baut einen Tag neu: Dienstplan, Abwesenheiten, Regeln, danach werden Lücken automatisch gefüllt.
+function planDay(date: string) {
+  const today = ymd(new Date());
+  const isToday = date === today;
+  const now = nowHHmm();
+  const empty = { filled: 0, open: [] as { date: string; group: string; from: string; to: string }[] };
+
+  if (isToday) db.prepare('DELETE FROM shifts WHERE date = ? AND start_time > ?').run(date, now);
+  else db.prepare('DELETE FROM shifts WHERE date = ?').run(date);
+  db.prepare('INSERT OR IGNORE INTO roster_generated_days (date) VALUES (?)').run(date);
+  if (workdaysBetween(date, date).length === 0) return empty;
+
+  insertStandardShifts(date, isToday ? now : '');
+
+  return fillGaps(date);
+}
+
+// Besetzt offene Zeiten automatisch; bestehende Schichten bleiben unangetastet.
+function fillGaps(date: string) {
+  const today = ymd(new Date());
+  const result = { filled: 0, open: [] as { date: string; group: string; from: string; to: string }[] };
+  const nowMinutes = minutesBetween('00:00', nowHHmm());
+  const firstSlot = date === today ? Math.ceil((nowMinutes + 1) / 15) * 15 : OPEN_SLOTS[0];
+  const twoPerson = (db.prepare('SELECT two_person_rule FROM ratio_settings WHERE group_id IS NULL').get() as any)?.two_person_rule !== 0;
+
+  for (const group of db.prepare('SELECT * FROM groups').all() as any[]) {
+    const plan = plannedChildren(group.id, date);
+    const excursion = excursionFor(group.id, date);
+    const needed = (slot: number) => {
+      if (excursion) return excursionCovers(plan, slot) ? excursion.staff_count : 0;
+      const children = plan[slot] ?? 0;
+      if (children === 0) return 0;
+      return Math.max(Math.ceil(children / group.target_ratio), twoPerson && children > 3 ? 2 : 1);
+    };
+    const requiredSkills: string[] = JSON.parse(group.required_skills || '[]');
+    const unfillable = new Set<number>();
+
+    for (let guard = 0; guard < 120; guard++) {
+      const shifts = db.prepare("SELECT start_time, end_time FROM shifts WHERE group_id = ? AND date = ? AND status = 'CONFIRMED'").all(group.id, date) as any[];
+      const staffAt = (slot: number) => shifts.filter(s => s.start_time < slotTime(slot + 15) && s.end_time > slotTime(slot)).length;
+      const gaps = OPEN_SLOTS.filter(m => m >= firstSlot && !unfillable.has(m) && staffAt(m) < needed(m));
+      if (gaps.length === 0) break;
+
+      let last = gaps[0];
+      while (gaps.includes(last + 15)) last += 15;
+      const pick = findSubstitute(group, date, gaps[0], Math.max(last + 15, gaps[0] + 60), requiredSkills);
+
+      if (!pick) {
+        result.open.push({ date, group: group.name, from: slotTime(gaps[0]), to: slotTime(last + 15) });
+        for (let m = gaps[0]; m <= last; m += 15) unfillable.add(m);
+        continue;
+      }
+
+      db.prepare(`
+        INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status, role_override, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', 'Automatische Vertretung', 'AUTO')
+      `).run(`shift_auto_${date}_${pick.staff.id}`, pick.staff.id, group.id, date, pick.start, pick.end, pick.breakMinutes);
+      queueStaffNotification(pick.staff.id, 'SHIFT_ASSIGNED', `Vertretung am ${date}: ${pick.start} - ${pick.end} Uhr (${group.name}).`, { date, start_time: pick.start, end_time: pick.end });
+      result.filled++;
+    }
+  }
+  return result;
+}
+
+app.get('/api/excursions', (req, res) => {
+  try {
+    res.json(db.prepare(`
+      SELECT e.*, g.name as group_name FROM excursions e JOIN groups g ON e.group_id = g.id ORDER BY e.date ASC
+    `).all());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/excursions', (req, res) => {
+  try {
+    const { date, group_id, staff_count } = req.body;
+    const staffCount = Number(staff_count);
+    if (!isIsoDate(date) || date < ymd(new Date())) return res.status(400).json({ error: 'Bitte ein Datum ab heute wählen' });
+    if (workdaysBetween(date, date).length === 0) return res.status(400).json({ error: 'An diesem Tag ist die Kita geschlossen' });
+    if (!db.prepare('SELECT 1 FROM groups WHERE id = ?').get(group_id)) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+    if (!Number.isInteger(staffCount) || staffCount < 1 || staffCount > 20) return res.status(400).json({ error: 'Die Anzahl muss zwischen 1 und 20 liegen' });
+    if (excursionFor(group_id, date)) return res.status(409).json({ error: 'Für diese Gruppe gibt es an dem Tag schon einen Wandertag' });
+
+    const id = 'exc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    const result = db.transaction(() => {
+      db.prepare('INSERT INTO excursions (id, date, group_id, staff_count) VALUES (?, ?, ?, ?)').run(id, date, group_id, staffCount);
+      generateRoster(date, date);
+      return fillGaps(date);
+    })();
+    res.status(201).json({
+      success: true,
+      id,
+      ...result,
+      message: result.open.length > 0 ? 'Wandertag eingetragen, aber nicht alle Betreuenden konnten eingeplant werden.' : 'Wandertag eingetragen und besetzt.'
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/excursions/:id', (req, res) => {
+  try {
+    const excursion = db.prepare('SELECT date FROM excursions WHERE id = ?').get(req.params.id) as any;
+    if (!excursion) return res.status(404).json({ error: 'Wandertag nicht gefunden' });
+    if (excursion.date < ymd(new Date())) return res.status(409).json({ error: 'Vergangene Tage sind abgeschlossen.' });
+    db.prepare('DELETE FROM excursions WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/roster/replan', (req, res) => {
+  try {
+    const { scope, week_start } = req.body;
+    const today = ymd(new Date());
+    let dates: string[];
+    if (scope === 'TODAY') {
+      dates = [today];
+    } else if (scope === 'WEEK' && isIsoDate(week_start)) {
+      const monday = parseISO(week_start);
+      dates = [0, 1, 2, 3, 4].map(i => ymd(addDays(monday, i))).filter(d => d >= today);
+      if (dates.length === 0) return res.status(400).json({ error: 'Diese Woche ist abgeschlossen und kann nicht mehr geändert werden.' });
+    } else {
+      return res.status(400).json({ error: 'Ungültiger Zeitraum' });
+    }
+
+    const results = db.transaction(() => dates.map(planDay))();
+    const filled = results.reduce((sum, r) => sum + r.filled, 0);
+    const open = results.flatMap(r => r.open);
+    const openText = open.slice(0, 3).map(o => `${o.date.slice(8)}.${o.date.slice(5, 7)}. ${o.group} ${o.from}–${o.to} Uhr`).join(', ');
+    res.json({
+      success: true,
+      filled,
+      open,
+      message: open.length > 0
+        ? `Neu geplant, ${filled} Vertretungen eingetragen. Nicht besetzbar: ${openText}${open.length > 3 ? ` und ${open.length - 3} weitere` : ''}.`
+        : `Neu geplant, ${filled} Vertretungen eingetragen. Alles ist besetzt.`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/roster-days', (req, res) => {
+  try {
+    const rows = db.prepare('SELECT date, followed FROM roster_day_status WHERE date BETWEEN ? AND ?').all(req.query.start, req.query.end) as any[];
+    res.json(Object.fromEntries(rows.map(r => [r.date, r.followed === 1])));
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/roster-days/:date', (req, res) => {
+  try {
+    const { date } = req.params;
+    const { followed } = req.body;
+    if (!isIsoDate(date) || date > ymd(new Date())) return res.status(400).json({ error: 'Künftige Tage können noch nicht bestätigt werden.' });
+    if (followed === null) {
+      db.prepare('DELETE FROM roster_day_status WHERE date = ?').run(date);
+    } else if (typeof followed === 'boolean') {
+      db.prepare(`
+        INSERT INTO roster_day_status (date, followed, decided_at) VALUES (?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET followed = excluded.followed, decided_at = excluded.decided_at
+      `).run(date, followed ? 1 : 0, new Date().toISOString());
+    } else {
+      return res.status(400).json({ error: 'Ungültige Angabe' });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// shortcut: eine im Einsatzplan gelöschte künftige Standardschicht kommt nach einer Dienstplan-Änderung wieder, bei Bedarf Löschungen mitspeichern.
+function resetFutureRoster() {
+  const today = ymd(new Date());
+  db.transaction(() => {
+    db.prepare("DELETE FROM shifts WHERE source = 'STANDARD' AND status = 'CONFIRMED' AND date > ?").run(today);
+    db.prepare('DELETE FROM roster_generated_days WHERE date > ?').run(today);
+  })();
+}
+
+// Unbefristete Krankmeldungen: das Datum weit in der Zukunft hält alle BETWEEN-Abfragen einfach.
+const OPEN_END = '9999-12-31';
+
+// Gibt freigewordene Tage nach einer verkürzten oder gelöschten Abwesenheit an den Dienstplan zurück.
+function restoreRoster(staffId: string, afterDate: string, until: string) {
+  const today = ymd(new Date());
+  db.prepare("DELETE FROM shifts WHERE staff_id = ? AND source = 'STANDARD' AND status = 'CANCELLED' AND date > ? AND date <= ?")
+    .run(staffId, afterDate > today ? afterDate : today, until);
+  resetFutureRoster();
+}
+
+app.get('/api/absences', (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT a.id, a.staff_id, a.type, a.start_date, a.end_date, s.name as staff_name
+      FROM absences a JOIN staff s ON a.staff_id = s.id
+      WHERE a.status = 'APPROVED' AND a.type IN ('SICK', 'VACATION') AND a.end_date >= ?
+      ORDER BY a.start_date ASC
+    `).all(ymd(new Date())) as any[];
+    const year = new Date().getFullYear();
+    const staff = db.prepare('SELECT * FROM staff WHERE is_active = 1').all() as any[];
+    res.json({
+      absences: rows.map(r => ({ ...r, end_date: r.end_date === OPEN_END ? null : r.end_date })),
+      remaining_vacation: Object.fromEntries(staff.map(s => [s.id, remainingVacationDays(s, year)]))
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const isIsoDate = (v: unknown): v is string => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+app.post('/api/absences', (req, res) => {
+  try {
+    const { staff_id, type, start_date, end_date } = req.body;
+    if (type !== 'SICK' && type !== 'VACATION') return res.status(400).json({ error: 'Ungültige Art' });
+    if (!isIsoDate(start_date)) return res.status(400).json({ error: 'Ungültiges Startdatum' });
+    if (end_date === null && type !== 'SICK') return res.status(400).json({ error: 'Urlaub braucht ein Enddatum' });
+    if (end_date !== null && (!isIsoDate(end_date) || end_date < start_date)) {
+      return res.status(400).json({ error: 'Das Ende darf nicht vor dem Beginn liegen' });
+    }
+    if (!db.prepare('SELECT 1 FROM staff WHERE id = ?').get(staff_id)) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
+
+    const end = end_date ?? OPEN_END;
+    const overlap = db.prepare(`
+      SELECT 1 FROM absences WHERE staff_id = ? AND status = 'APPROVED' AND start_date <= ? AND end_date >= ?
+    `).get(staff_id, end, start_date);
+    if (overlap) return res.status(409).json({ error: 'In diesem Zeitraum gibt es schon einen Eintrag' });
+
+    const id = 'abs_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO absences (id, staff_id, type, start_date, end_date, status, reason, created_at)
+        VALUES (?, ?, ?, ?, ?, 'APPROVED', ?, ?)
+      `).run(id, staff_id, type, start_date, end, type === 'SICK' ? 'Krankmeldung' : 'Urlaub', new Date().toISOString());
+      cancelUpcomingShifts(staff_id, start_date, end);
+    })();
+    resetFutureRoster();
+    res.status(201).json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/absences/:id/end', (req, res) => {
+  try {
+    const { end_date } = req.body;
+    const absence = db.prepare('SELECT * FROM absences WHERE id = ?').get(req.params.id) as any;
+    if (!absence) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+    if (!isIsoDate(end_date) || end_date < absence.start_date) return res.status(400).json({ error: 'Das Ende darf nicht vor dem Beginn liegen' });
+
+    db.prepare('UPDATE absences SET end_date = ? WHERE id = ?').run(end_date, absence.id);
+    restoreRoster(absence.staff_id, end_date, absence.end_date);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/absences/:id', (req, res) => {
+  try {
+    const absence = db.prepare('SELECT * FROM absences WHERE id = ?').get(req.params.id) as any;
+    if (!absence) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+
+    db.prepare('DELETE FROM absences WHERE id = ?').run(absence.id);
+    restoreRoster(absence.staff_id, ymd(addDays(parseISO(absence.start_date), -1)), absence.end_date);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const standardShiftRows = () => {
+  const rows = db.prepare(`
+    SELECT ss.*, g.name as group_name, st.availability_rules
+    FROM standard_shifts ss JOIN groups g ON ss.group_id = g.id JOIN staff st ON ss.staff_id = st.id
+  `).all() as any[];
+
+  return rows.map(({ availability_rules, ...row }) => ({
+    ...row,
+    warnings: ruleIssues(parseRules(availability_rules), {
+      weekday: row.weekday,
+      start: row.start_time,
+      end: row.end_time,
+      netHours: (minutesBetween(row.start_time, row.end_time) - row.break_minutes) / 60,
+      weekDayCount: rows.filter(r => r.staff_id === row.staff_id).length
+    }).map(i => i.text)
+  }));
+};
+
+app.put('/api/staff/:id/availability', (req, res) => {
+  try {
+    const rules = sanitizeRules(req.body.rules);
+    if (!rules) return res.status(400).json({ error: 'Bitte prüfe die Regeln: Bei „Nur bestimmte Tage“ muss ein Tag gewählt sein, „Sonstiges“ braucht einen Text.' });
+    const result = db.prepare('UPDATE staff SET availability_rules = ? WHERE id = ?').run(JSON.stringify(rules), req.params.id);
+    if (result.changes === 0) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
+    resetFutureRoster();
+    res.json({ success: true, rules });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/standard-shifts', (req, res) => {
+  try {
+    res.json(standardShiftRows());
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/standard-shifts', (req, res) => {
+  try {
+    const { staff_id, weekdays, group_id, start_time, end_time, break_minutes } = req.body;
+    const isTime = (v: unknown) => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+    const breakMinutes = Number(break_minutes);
+    if (!db.prepare('SELECT 1 FROM staff WHERE id = ?').get(staff_id)) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
+    if (!db.prepare('SELECT 1 FROM groups WHERE id = ?').get(group_id)) return res.status(404).json({ error: 'Gruppe nicht gefunden' });
+    if (!Array.isArray(weekdays) || weekdays.length === 0 || !weekdays.every(d => [1, 2, 3, 4, 5].includes(d))) {
+      return res.status(400).json({ error: 'Ungültige Wochentage' });
+    }
+    if (!isTime(start_time) || !isTime(end_time) || start_time >= end_time) {
+      return res.status(400).json({ error: 'Das Ende muss nach dem Beginn liegen' });
+    }
+    if (!Number.isInteger(breakMinutes) || breakMinutes < 0 || breakMinutes > 120) {
+      return res.status(400).json({ error: 'Die Pause muss zwischen 0 und 120 Minuten liegen' });
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO standard_shifts (staff_id, weekday, group_id, start_time, end_time, break_minutes) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(staff_id, weekday) DO UPDATE SET
+        group_id = excluded.group_id, start_time = excluded.start_time,
+        end_time = excluded.end_time, break_minutes = excluded.break_minutes
+    `);
+    db.transaction(() => {
+      for (const d of weekdays) upsert.run(staff_id, d, group_id, start_time, end_time, breakMinutes);
+    })();
+    resetFutureRoster();
+    res.json({ success: true, rows: standardShiftRows() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/standard-shifts/:staffId/:weekday', (req, res) => {
+  try {
+    db.prepare('DELETE FROM standard_shifts WHERE staff_id = ? AND weekday = ?').run(req.params.staffId, Number(req.params.weekday));
+    resetFutureRoster();
+    res.json({ success: true, rows: standardShiftRows() });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/shifts', (req, res) => {
   try {
     const { start, end, group_id, staff_id } = req.query;
+    if (start && end) generateRoster(String(start), String(end));
     let query = `
       SELECT s.*, st.name as staff_name, st.role as staff_role, st.is_fachkraft, st.color as staff_color,
              st.skills as staff_skills, g.name as group_name, g.color as group_color
@@ -3870,6 +4389,8 @@ app.post('/api/shifts/copy-week', (req, res) => {
           WHERE staff_id = ? AND start_date <= ? AND end_date >= ?
         `).get(s.staff_id, newDateStr, newDateStr);
 
+        if (newShiftLock(newDateStr, s.start_time)) continue;
+
         if (vac) {
           skippedVacation++;
           continue;
@@ -3921,12 +4442,21 @@ app.get('/api/closures', (req, res) => {
 app.post('/api/closures', (req, res) => {
   try {
     const { title, date, type, notes } = req.body;
+    if (!isIsoDate(date)) return res.status(400).json({ error: 'Ungültiges Datum' });
+    if (date < ymd(new Date())) return res.status(409).json({ error: 'Vergangene Tage sind abgeschlossen und können nicht mehr geändert werden.' });
+    if (db.prepare('SELECT 1 FROM kita_closures WHERE date = ?').get(date)) return res.status(409).json({ error: 'Dieser Tag ist schon eingetragen' });
+
     const id = 'cls_' + Date.now();
-    db.prepare(`
-      INSERT INTO kita_closures (id, title, date, type, notes)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(id, title, date, type || 'SCHLIESSTAG', notes || null);
-    res.status(201).json({ id, title, date, type, notes });
+    const closureType = type || 'SCHLIESSTAG';
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO kita_closures (id, title, date, type, notes)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(id, title || 'Schließtag', date, closureType, notes || null);
+      db.prepare('DELETE FROM excursions WHERE date = ?').run(date);
+      if (closureType !== 'KONZEPTIONSTAG') planDay(date);
+    })();
+    res.status(201).json({ id, title, date, type: closureType, notes });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -3934,7 +4464,12 @@ app.post('/api/closures', (req, res) => {
 
 app.delete('/api/closures/:id', (req, res) => {
   try {
-    db.prepare('DELETE FROM kita_closures WHERE id = ?').run(req.params.id);
+    const closure = db.prepare('SELECT date, type FROM kita_closures WHERE id = ?').get(req.params.id) as any;
+    if (closure && closure.date < ymd(new Date())) return res.status(409).json({ error: 'Vergangene Tage sind abgeschlossen und können nicht mehr geändert werden.' });
+    db.transaction(() => {
+      db.prepare('DELETE FROM kita_closures WHERE id = ?').run(req.params.id);
+      if (closure && closure.type !== 'KONZEPTIONSTAG') planDay(closure.date);
+    })();
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -3944,6 +4479,39 @@ app.delete('/api/closures/:id', (req, res) => {
 // ---------------------------------------------------------------------------
 // ARBZG & LEGAL COMPLIANCE VALIDATOR (ArbZG § 3, § 4, § 5, Abwesenheiten)
 // ---------------------------------------------------------------------------
+// Prüft die persönlichen Verfügbarkeitsregeln für eine konkrete Schicht.
+function availabilityIssues(staff: any, date: string, start: string, end: string, breakMinutes: number): RuleIssue[] {
+  const rules = parseRules(staff.availability_rules);
+  if (rules.length === 0) return [];
+
+  const day = parseISO(date);
+  const otherDays = db.prepare(`
+    SELECT COUNT(DISTINCT date) as c FROM shifts
+    WHERE staff_id = ? AND date BETWEEN ? AND ? AND date != ? AND status = 'CONFIRMED'
+  `).get(staff.id, ymd(startOfISOWeek(day)), ymd(endOfISOWeek(day)), date) as { c: number };
+
+  let nextDay = addDays(day, 1);
+  while (nextDay.getDay() === 0 || nextDay.getDay() === 6) nextDay = addDays(nextDay, 1);
+  const beforeVacation = !!db.prepare(`
+    SELECT 1 FROM absences WHERE staff_id = ? AND type = 'VACATION' AND status = 'APPROVED' AND ? BETWEEN start_date AND end_date
+  `).get(staff.id, ymd(nextDay));
+
+  return ruleIssues(rules, {
+    weekday: day.getDay(),
+    start,
+    end,
+    netHours: (minutesBetween(start, end) - breakMinutes) / 60,
+    weekDayCount: otherDays.c + 1,
+    weekNumber: getISOWeek(day),
+    beforeVacation
+  });
+}
+
+const parseBreakMinutes = (value: unknown) => {
+  const minutes = value === undefined || value === null || value === '' ? NaN : Number(value);
+  return Number.isFinite(minutes) ? minutes : 30;
+};
+
 export function validateShiftArbZG(params: {
   staff_id: string;
   date: string;
@@ -4043,6 +4611,11 @@ export function validateShiftArbZG(params: {
     warnings.push(`Abwesenheitskonflikt: Mitarbeiter hat an diesem Tag eine ${absLabel}${absence.reason ? ` ('${absence.reason}')` : ''}!`);
   }
 
+  const staffRow = db.prepare('SELECT id, availability_rules FROM staff WHERE id = ?').get(staff_id);
+  if (staffRow) {
+    availabilityIssues(staffRow, date, start_time, end_time, break_minutes || 0).forEach(i => warnings.push(`Verfügbarkeit: ${i.text}`));
+  }
+
   return {
     warnings,
     warning: warnings.length > 0 ? warnings.join(' | ') : null
@@ -4052,6 +4625,8 @@ export function validateShiftArbZG(params: {
 app.post('/api/shifts', (req, res) => {
   try {
     const { staff_id, group_id, date, start_time, end_time, break_minutes, role_override } = req.body;
+    const lockReason = newShiftLock(date, start_time);
+    if (lockReason) return res.status(409).json({ error: lockReason });
     const id = 'shift_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
 
     const arbzgCheck = validateShiftArbZG({
@@ -4059,13 +4634,13 @@ app.post('/api/shifts', (req, res) => {
       date,
       start_time,
       end_time,
-      break_minutes: Number(break_minutes) || 30
+      break_minutes: parseBreakMinutes(break_minutes)
     });
 
     db.prepare(`
       INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status, role_override, warning)
       VALUES (?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?, ?)
-    `).run(id, staff_id, group_id, date, start_time, end_time, Number(break_minutes) || 30, role_override || null, arbzgCheck.warning);
+    `).run(id, staff_id, group_id, date, start_time, end_time, parseBreakMinutes(break_minutes), role_override || null, arbzgCheck.warning);
 
     const group = db.prepare('SELECT name FROM groups WHERE id = ?').get(group_id) as any;
     const notifResult = queueStaffNotification(
@@ -4104,6 +4679,22 @@ app.put('/api/shifts/:id', (req, res) => {
     const break_minutes = req.body.break_minutes !== undefined ? Number(req.body.break_minutes) : existing.break_minutes;
     const role_override = req.body.role_override !== undefined ? req.body.role_override : existing.role_override;
 
+    const todayDate = ymd(new Date());
+    const nowTime = nowHHmm();
+    const startedAlready = existing.date === todayDate && existing.start_time <= nowTime;
+    if (existing.date < todayDate || (existing.date === todayDate && existing.end_time <= nowTime)) {
+      return res.status(409).json({ error: 'Abgeschlossene Schichten können nicht mehr geändert werden.' });
+    }
+    if (startedAlready) {
+      const onlyEndChanged = staff_id === existing.staff_id && group_id === existing.group_id && date === existing.date && start_time === existing.start_time;
+      if (!onlyEndChanged || end_time <= nowTime) {
+        return res.status(409).json({ error: 'Bei einer laufenden Schicht lässt sich nur noch ein künftiges Ende ändern.' });
+      }
+    } else {
+      const lockReason = newShiftLock(date, start_time);
+      if (lockReason) return res.status(409).json({ error: lockReason });
+    }
+
     const arbzgCheck = validateShiftArbZG({
       staff_id,
       date,
@@ -4115,7 +4706,7 @@ app.put('/api/shifts/:id', (req, res) => {
 
     db.prepare(`
       UPDATE shifts
-      SET staff_id = ?, group_id = ?, date = ?, start_time = ?, end_time = ?, break_minutes = ?, role_override = ?, warning = ?
+      SET staff_id = ?, group_id = ?, date = ?, start_time = ?, end_time = ?, break_minutes = ?, role_override = ?, warning = ?, source = 'MANUAL'
       WHERE id = ?
     `).run(staff_id, group_id, date, start_time, end_time, break_minutes, role_override || null, arbzgCheck.warning, shiftId);
 
@@ -4135,6 +4726,8 @@ app.delete('/api/shifts/:id', (req, res) => {
     const shift = db.prepare('SELECT * FROM shifts WHERE id = ?').get(req.params.id) as any;
     let notifResult = null;
     if (shift) {
+      const lockReason = newShiftLock(shift.date, shift.start_time);
+      if (lockReason) return res.status(409).json({ error: lockReason });
       notifResult = queueStaffNotification(
         shift.staff_id,
         'SHIFT_CANCELLED',
@@ -4189,6 +4782,13 @@ app.post('/api/approvals/:id/decide', (req, res) => {
 
     const approval = db.prepare('SELECT * FROM approvals WHERE id = ?').get(approvalId) as any;
     if (!approval) return res.status(404).json({ error: 'Freigabe-Eintrag nicht gefunden' });
+    if (approval.status !== 'PENDING') return res.status(409).json({ error: 'Dieser Antrag wurde bereits entschieden' });
+    if (action !== 'APPROVED' && action !== 'REJECTED') return res.status(400).json({ error: 'Ungültige Entscheidung' });
+    if (action === 'APPROVED' && approval.type === 'SHIFT_SWAP' && approval.shift_id) {
+      const swapShift = db.prepare('SELECT date, start_time FROM shifts WHERE id = ?').get(approval.shift_id) as any;
+      const lockReason = swapShift && newShiftLock(swapShift.date, swapShift.start_time);
+      if (lockReason) return res.status(409).json({ error: lockReason });
+    }
 
     const now = new Date().toISOString();
 
@@ -4197,7 +4797,7 @@ app.post('/api/approvals/:id/decide', (req, res) => {
         UPDATE approvals
         SET status = ?, decision_note = ?, decision_by = ?, decided_at = ?
         WHERE id = ?
-      `).run(action, decision_note || '', decision_by || 'Sabine Weber (Leitung)', now, approvalId);
+      `).run(action, decision_note || '', decision_by || 'Einrichtungsleitung', now, approvalId);
 
       const details = JSON.parse(approval.details || '{}');
 
@@ -4208,24 +4808,28 @@ app.post('/api/approvals/:id/decide', (req, res) => {
       `).run(
         logId, approval.requester_id,
         `Antrag ${action === 'APPROVED' ? 'freigegeben' : 'abgelehnt'}: ${details.title || ''}`,
-        `Entscheidung durch ${decision_by || 'Sabine Weber (Leitung)'}${decision_note ? ': "' + decision_note + '"' : '.'}`,
-        decision_by || 'Sabine Weber (Leitung)',
+        `Entscheidung durch ${decision_by || 'Einrichtungsleitung'}${decision_note ? ': "' + decision_note + '"' : '.'}`,
+        decision_by || 'Einrichtungsleitung',
         now
       );
 
       if (action === 'APPROVED') {
         if (approval.type === 'SHIFT_SWAP' && approval.shift_id && approval.target_id) {
-          db.prepare('UPDATE shifts SET staff_id = ? WHERE id = ?').run(approval.target_id, approval.shift_id);
+          db.prepare("UPDATE shifts SET staff_id = ?, source = 'MANUAL' WHERE id = ?").run(approval.target_id, approval.shift_id);
         }
 
         if (approval.type === 'EMERGENCY_REPLACEMENT') {
-          const today = format(new Date(), 'yyyy-MM-dd');
-          const newShiftId = 'shift_emerg_' + Date.now();
           const targetGrpId = details.target_group_id || 'g_u3_maeuse';
-          db.prepare(`
+          const dates: string[] = details.dates || [format(new Date(), 'yyyy-MM-dd')];
+          const insertShift = db.prepare(`
             INSERT INTO shifts (id, staff_id, group_id, date, start_time, end_time, break_minutes, status)
-            VALUES (?, ?, ?, ?, '08:00', '15:30', 30, 'CONFIRMED')
-          `).run(newShiftId, approval.requester_id, targetGrpId, today);
+            VALUES (?, ?, ?, ?, ?, '15:30', 30, 'CONFIRMED')
+          `);
+          const todayDate = ymd(new Date());
+          for (const date of dates.filter(d => d >= todayDate)) {
+            const start = date === todayDate && nowHHmm() > '08:00' ? nowHHmm() : '08:00';
+            if (start < '15:30') insertShift.run(`shift_emerg_${Date.now()}_${date}`, approval.requester_id, targetGrpId, date, start);
+          }
         }
 
         if (approval.type === 'VACATION_REQUEST') {
@@ -4234,6 +4838,8 @@ app.post('/api/approvals/:id/decide', (req, res) => {
             INSERT INTO absences (id, staff_id, type, start_date, end_date, status, reason, created_at)
             VALUES (?, ?, 'VACATION', ?, ?, 'APPROVED', ?, ?)
           `).run(absenceId, approval.requester_id, details.start_date, details.end_date, details.title, now);
+          cancelUpcomingShifts(approval.requester_id, details.start_date, details.end_date);
+          resetFutureRoster();
         }
       }
     });
@@ -4298,7 +4904,7 @@ app.post('/api/approvals/request-vacation', (req, res) => {
 
       if (conflicts.length > 0) {
         const names = conflicts.map((c: any) => c.staff_name).join(', ');
-        conflictWarning = `⚠️ Urlaubs-Kollision: ${names} aus der Gruppe '${requesterStaff.target_group_id}' hat im selben Zeitraum bereits genehmigten Urlaub!`;
+        conflictWarning = `Urlaubs-Kollision: ${names} aus der Gruppe '${requesterStaff.target_group_id}' hat im selben Zeitraum bereits genehmigten Urlaub!`;
       }
     }
 
@@ -4309,7 +4915,7 @@ app.post('/api/approvals/request-vacation', (req, res) => {
       start_date,
       end_date,
       reason: reason || 'Erholungsurlaub',
-      remaining_vacation: `${requesterStaff.annual_vacation_days - 6} Tage`,
+      remaining_vacation: `${remainingVacationDays(requesterStaff, String(start_date).slice(0, 4))} Tage`,
       team_conflict_warning: conflictWarning
     };
 
@@ -4332,22 +4938,32 @@ function handleTriggerSick(req: any, res: any) {
     const staffMember = db.prepare('SELECT * FROM staff WHERE id = ?').get(staff_id) as any;
     if (!staffMember) return res.status(404).json({ error: 'Mitarbeiter nicht gefunden' });
 
+    const sickDays = Math.max(1, Math.floor(Number(days)) || 1);
+    const lastSickDay = ymd(addDays(new Date(), sickDays - 1));
+    generateRoster(today, lastSickDay);
+
     const absenceId = 'abs_' + Date.now();
     db.prepare(`
       INSERT INTO absences (id, staff_id, type, start_date, end_date, status, reason, created_at)
       VALUES (?, ?, 'SICK', ?, ?, 'APPROVED', ?, ?)
-    `).run(absenceId, staff_id, today, today, reason || 'Akute Krankmeldung', new Date().toISOString());
+    `).run(absenceId, staff_id, today, lastSickDay, reason || 'Akute Krankmeldung', new Date().toISOString());
+
+    const cancelledDates = (db.prepare(`
+      SELECT DISTINCT date FROM shifts WHERE staff_id = ? AND date BETWEEN ? AND ? AND status = 'CONFIRMED'
+    `).all(staff_id, today, lastSickDay) as any[]).map(r => r.date);
+    const replacementDates = [...new Set([today, ...cancelledDates])];
 
     // Find if the person had a confirmed shift today to find group
     const todayShift = db.prepare("SELECT * FROM shifts WHERE staff_id = ? AND date = ? AND status = 'CONFIRMED'").get(staff_id, today) as any;
-    db.prepare(`UPDATE shifts SET status = 'CANCELLED' WHERE staff_id = ? AND date = ?`).run(staff_id, today);
+    cancelUpcomingShifts(staff_id, today, lastSickDay);
 
     // Target group is either from today's shift or their default group
     const targetGroupId = todayShift?.group_id || staffMember.target_group_id || 'g_u3_maeuse';
     const group = db.prepare('SELECT * FROM groups WHERE id = ?').get(targetGroupId) as any;
     const requiredSkills: string[] = JSON.parse(group?.required_skills || '[]');
 
-    const allStaff = db.prepare('SELECT * FROM staff WHERE is_active = 1 AND id != ?').all(staff_id) as any[];
+    const allStaff = (db.prepare('SELECT * FROM staff WHERE is_active = 1 AND id != ?').all(staff_id) as any[])
+      .filter(s => availabilityIssues(s, today, '08:00', '15:30', 30).length === 0);
     const busyStaffIds = new Set(
       db.prepare("SELECT staff_id FROM shifts WHERE date = ? AND status = 'CONFIRMED'")
         .all(today)
@@ -4398,6 +5014,7 @@ function handleTriggerSick(req: any, res: any) {
         description: `Ausfall von ${staffMember.name}. ${chosenStaff.name} [${roleNote}] erfüllt das Profil (${chosenSkills.join(', ')}) und kann als Vertretung einspringen.`,
         target_group: group?.name || 'Krippe',
         target_group_id: targetGroupId,
+        dates: replacementDates,
         time: '08:00 - 15:30 Uhr',
         skills_matched: chosenSkills,
         ratio_impact: 'Stellt den gesetzlichen Betreuungsschlüssel & Fachkraftquote sofort wieder her.'
@@ -4426,7 +5043,7 @@ function handleTriggerSick(req: any, res: any) {
         `).run(
           notifId,
           d.id,
-          `🚨 KRITISCHE WARNUNG: Krankmeldung von ${staffMember.name}`,
+          `KRITISCHE WARNUNG: Krankmeldung von ${staffMember.name}`,
           `Dringender Handlungsbedarf für Leitung: ${staffMember.name} hat sich krankgemeldet (${reason || 'Akute Krankmeldung'}). Betreuungsschlüssel & Vertretung müssen sofort gesichert werden!`,
           staffMember.name,
           nowIso
@@ -4435,7 +5052,7 @@ function handleTriggerSick(req: any, res: any) {
         queueStaffNotification(
           d.id,
           'CRITICAL_SICK_ALERT',
-          `🚨 KRITISCHE WARNUNG: Akute Krankmeldung von ${staffMember.name} (${reason || 'Krankheit'})`,
+          `KRITISCHE WARNUNG: Akute Krankmeldung von ${staffMember.name} (${reason || 'Krankheit'})`,
           { staff_id, staff_name: staffMember.name, reason, force_immediate: true, is_critical: true }
         );
       } else {
@@ -4445,7 +5062,7 @@ function handleTriggerSick(req: any, res: any) {
         `).run(
           notifId,
           d.id,
-          `ℹ️ Krankmeldung eingegangen: ${staffMember.name}`,
+          `Krankmeldung eingegangen: ${staffMember.name}`,
           `${staffMember.name} hat sich krankgemeldet (${reason || 'Krankheit'}).`,
           staffMember.name,
           nowIso
@@ -4544,21 +5161,14 @@ export function checkLegalFramework(staff: any, targetDate: string, startTime: s
     checks.push({ rule: 'ArbZG § 5 (Mindestruhezeit 11h)', passed: true, message: `Ruhezeit zur Vorschicht beträgt ${restHoursBefore.toFixed(1)}h (mind. 11h erfüllt)` });
   }
 
-  // 4. Availability window check
-  let availabilityCompliant = true;
-  if (staff.availability_window && staff.availability_window.includes('-')) {
-    const match = staff.availability_window.match(/(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})/);
-    if (match) {
-      const [, availStart, availEnd] = match;
-      if (startTime < availStart || endTime > availEnd) {
-        availabilityCompliant = false;
-        const msg = `Außerhalb des vereinbarten Verfügbarkeitsrahmens (${staff.availability_window})`;
-        checks.push({ rule: 'Verfügbarkeitsrahmen', passed: false, message: msg });
-      } else {
-        checks.push({ rule: 'Verfügbarkeitsrahmen', passed: true, message: `Im Zeitfenster (${staff.availability_window})` });
-      }
-    }
+  // 4. Persönliche Verfügbarkeitsregeln
+  const availability = availabilityIssues(staff, targetDate, startTime, endTime, 30);
+  for (const issue of availability) {
+    const msg = `Verfügbarkeit: ${issue.text}`;
+    issues.push(msg);
+    checks.push({ rule: 'Verfügbarkeit', passed: false, message: msg });
   }
+  if (availability.length === 0) checks.push({ rule: 'Verfügbarkeit', passed: true, message: 'Passt zu den persönlichen Regeln' });
 
   const isCompliant = issues.length === 0;
 
@@ -4635,7 +5245,7 @@ app.post('/api/emergency/start-cycle', (req, res) => {
       `).run(
         'log_no_candidates_' + Date.now(),
         leitungId,
-        '🚨 Keine Mitarbeiter im rechtlichen Rahmen verfügbar!',
+        'Keine Mitarbeiter im rechtlichen Rahmen verfügbar!',
         `Für den Ausfall am ${targetDate} (${targetStartTime} - ${targetEndTime} Uhr) in ${group.name} erfüllt kein Mitarbeiter die gesetzlichen Vorgaben (ArbZG § 3 max. 10h, ArbZG § 5 Mindestruhezeit 11h oder Abwesenheiten). Die Einrichtungsleitung muss jetzt entscheiden!`,
         now
       );
@@ -4672,7 +5282,7 @@ app.post('/api/emergency/start-cycle', (req, res) => {
       candidates[0].staff_id,
       isFirstCritical ? 'CRITICAL_STANDBY_ALERT' : 'SUBSTITUTE_REQUEST',
       isFirstCritical
-        ? `🚨 DRINGENDE NOTFALL-ANFRAGE: Kannst du am ${targetDate} (${targetStartTime} - ${targetEndTime} Uhr) in ${group.name} spontan aushelfen?`
+        ? `DRINGENDE NOTFALL-ANFRAGE: Kannst du am ${targetDate} (${targetStartTime} - ${targetEndTime} Uhr) in ${group.name} spontan aushelfen?`
         : `Kannst du am ${targetDate} (${targetStartTime} - ${targetEndTime} Uhr) in ${group.name} einspringen? Bitte bestätigen oder ablehnen.`,
       { date: targetDate, start_time: targetStartTime, end_time: targetEndTime, group_id: group.id, cycle_id: cycleId, force_immediate: true, is_critical: isFirstCritical }
     );
@@ -4784,7 +5394,7 @@ app.post('/api/emergency/cycles/:id/respond', (req, res) => {
           candidates[nextIndex].staff_id,
           isNextCritical ? 'CRITICAL_STANDBY_ALERT' : 'SUBSTITUTE_REQUEST',
           isNextCritical
-            ? `🚨 DRINGENDE NOTFALL-ANFRAGE: Kannst du am ${cycle.date} (${cycle.start_time} - ${cycle.end_time} Uhr) in ${group?.name || 'Gruppe'} spontan aushelfen?`
+            ? `DRINGENDE NOTFALL-ANFRAGE: Kannst du am ${cycle.date} (${cycle.start_time} - ${cycle.end_time} Uhr) in ${group?.name || 'Gruppe'} spontan aushelfen?`
             : `Kannst du am ${cycle.date} (${cycle.start_time} - ${cycle.end_time} Uhr) in ${group?.name || 'Gruppe'} einspringen? Bitte in der App bestätigen oder ablehnen.`,
           { date: cycle.date, start_time: cycle.start_time, end_time: cycle.end_time, group_id: cycle.group_id, cycle_id: cycle.id, force_immediate: true, is_critical: isNextCritical }
         );
@@ -4808,7 +5418,7 @@ app.post('/api/emergency/cycles/:id/respond', (req, res) => {
         const leitung = db.prepare("SELECT id FROM staff WHERE role = 'LEITUNG' LIMIT 1").get() as any;
         const leitungId = leitung?.id || 's_sabine';
 
-        const alertTitle = '🚨 Jeder hat nein gesagt! Leitung muss entscheiden';
+        const alertTitle = 'Jeder hat nein gesagt! Leitung muss entscheiden';
         const alertDesc = `Alle ${candidates.length} im rechtlichen Rahmen verfügbaren Mitarbeiter haben das Einspringen für ${group?.name || 'Gruppe'} am ${cycle.date} (${cycle.start_time} - ${cycle.end_time} Uhr) abgelehnt. Die Einrichtungsleitung muss jetzt entscheiden, wer einspringt!`;
 
         db.prepare(`
@@ -5049,10 +5659,15 @@ app.post('/api/timelogs/stamp', (req, res) => {
     }
 
     const currentLog = db.prepare(`
-      SELECT * FROM timelogs WHERE staff_id = ? AND date = ? ORDER BY id DESC LIMIT 1
+      SELECT * FROM timelogs WHERE staff_id = ? AND date = ? ORDER BY rowid DESC LIMIT 1
     `).get(staff_id, today) as any;
+    const isOpen = !!currentLog && currentLog.status !== 'COMPLETED';
+    const finishedBreak = isOpen && currentLog.status === 'IN_BREAK' && currentLog.break_started_at
+      ? minutesBetween(currentLog.break_started_at, nowTime)
+      : 0;
 
     if (action === 'CLOCK_IN') {
+      if (isOpen) return res.status(409).json({ error: `Bereits seit ${currentLog.clock_in} Uhr eingestempelt` });
       const id = 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
       db.prepare(`
         INSERT INTO timelogs (id, staff_id, date, clock_in, break_minutes, status)
@@ -5062,12 +5677,11 @@ app.post('/api/timelogs/stamp', (req, res) => {
     }
 
     if (action === 'BREAK') {
-      if (!currentLog) return res.status(400).json({ error: 'Noch nicht eingestempelt' });
+      if (!isOpen) return res.status(400).json({ error: 'Noch nicht eingestempelt' });
       const newStatus = currentLog.status === 'IN_BREAK' ? 'CLOCKED_IN' : 'IN_BREAK';
-      const addedBreak = currentLog.status === 'IN_BREAK' ? 30 : 0;
       db.prepare(`
-        UPDATE timelogs SET status = ?, break_minutes = break_minutes + ? WHERE id = ?
-      `).run(newStatus, addedBreak, currentLog.id);
+        UPDATE timelogs SET status = ?, break_minutes = break_minutes + ?, break_started_at = ? WHERE id = ?
+      `).run(newStatus, finishedBreak, newStatus === 'IN_BREAK' ? nowTime : null, currentLog.id);
       return res.json({ 
         success: true, 
         action, 
@@ -5077,10 +5691,10 @@ app.post('/api/timelogs/stamp', (req, res) => {
     }
 
     if (action === 'CLOCK_OUT') {
-      if (!currentLog) return res.status(400).json({ error: 'Noch nicht eingestempelt' });
+      if (!isOpen) return res.status(400).json({ error: 'Noch nicht eingestempelt' });
       db.prepare(`
-        UPDATE timelogs SET clock_out = ?, status = 'COMPLETED' WHERE id = ?
-      `).run(nowTime, currentLog.id);
+        UPDATE timelogs SET clock_out = ?, status = 'COMPLETED', break_minutes = break_minutes + ?, break_started_at = NULL WHERE id = ?
+      `).run(nowTime, finishedBreak, currentLog.id);
       return res.json({ success: true, action, time: nowTime, message: `Schönen Feierabend, ${staffMember.name}! Ausgestempelt um ${nowTime} Uhr.` });
     }
 
@@ -5092,7 +5706,7 @@ app.post('/api/timelogs/stamp', (req, res) => {
 
 app.get('/api/announcements', (req, res) => {
   try {
-    const announcements = db.prepare('SELECT * FROM announcements ORDER BY priority = "HIGH" DESC, date DESC').all();
+    const announcements = db.prepare("SELECT * FROM announcements ORDER BY priority = 'HIGH' DESC, date DESC").all();
     res.json(announcements);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -5105,38 +5719,15 @@ app.get('/api/export/datev', (req, res) => {
     const staffList = db.prepare('SELECT * FROM staff WHERE is_active = 1 ORDER BY name ASC').all() as any[];
 
     const exportRows = staffList.map(s => {
-      const logs = db.prepare(`
-        SELECT * FROM timelogs 
-        WHERE staff_id = ? AND date LIKE ? AND clock_out IS NOT NULL
-      `).all(s.id, `${month}%`) as any[];
-
-      let totalMinutes = 0;
-      logs.forEach(l => {
-        const [inH, inM] = l.clock_in.split(':').map(Number);
-        const [outH, outM] = l.clock_out.split(':').map(Number);
-        const worked = (outH * 60 + outM) - (inH * 60 + inM) - (l.break_minutes || 0);
-        if (worked > 0) totalMinutes += worked;
-      });
-
-      const adjustments = db.prepare(`
-        SELECT COALESCE(SUM(hours), 0) as total_adj FROM overtime_adjustments
-        WHERE staff_id = ? AND date LIKE ?
-      `).get(s.id, `${month}%`) as { total_adj: number };
-
-      const actualHours = parseFloat((totalMinutes / 60).toFixed(2));
-      const targetMonthlyHours = parseFloat((s.weekly_hours * 4.33).toFixed(2));
-      const overtime = parseFloat((actualHours + adjustments.total_adj - targetMonthlyHours).toFixed(2));
+      const hours = monthHours(s, month);
 
       return {
         personal_nr: s.id.replace('s_', 'P-'),
         name: s.name,
         role: s.role,
         contract_hours: s.weekly_hours,
-        target_month_hours: targetMonthlyHours,
-        actual_hours: actualHours,
-        adjustments_hours: adjustments.total_adj,
-        overtime_hours: overtime,
-        status: overtime >= 0 ? 'Normal / Überstunden' : 'Minderstunden'
+        ...hours,
+        status: hours.overtime_hours >= 0 ? 'Normal / Überstunden' : 'Minderstunden'
       };
     });
 
@@ -5182,13 +5773,20 @@ const bgInterval = setInterval(() => {
 }, 15000);
 
 const server = app.listen(PORT, () => {
-  console.log(`🚀 KitaPlaner Backend running at http://localhost:${PORT}`);
-  console.log(`🩺 Healthcheck: http://localhost:${PORT}/api/health`);
+  console.log(`KitaPlaner Backend running at http://localhost:${PORT}`);
+  console.log(`Healthcheck: http://localhost:${PORT}/api/health`);
 });
+
+const runAutoBackup = () => createBackup().then(
+  (file) => console.log(`Automatisches Backup: ${file}`),
+  (err) => console.error('Automatisches Backup fehlgeschlagen:', err)
+);
+setTimeout(runAutoBackup, 60 * 1000);
+setInterval(runAutoBackup, 60 * 60 * 1000);
 
 // Graceful Shutdown on SIGTERM and SIGINT
 const gracefulShutdown = (signal: string) => {
-  console.log(`\n🛑 Signal ${signal} empfangen. Beende KitaPlaner Server ordnungsgemäß...`);
+  console.log(`\nSignal ${signal} empfangen. Beende KitaPlaner Server ordnungsgemäß...`);
   clearInterval(bgInterval);
   server.close(() => {
     console.log('HTTP Server geschlossen.');

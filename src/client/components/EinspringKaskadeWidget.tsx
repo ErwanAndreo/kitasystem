@@ -4,17 +4,12 @@ import {
   Users, 
   ShieldAlert, 
   CheckCircle2, 
-  XCircle, 
-  Clock, 
-  AlertTriangle, 
-  ChevronRight, 
   RotateCw, 
   Sparkles,
   Gavel,
   Check,
   X,
   Send,
-  UserCheck
 } from 'lucide-react';
 
 interface EinspringKaskadeWidgetProps {
@@ -34,7 +29,15 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
   const [showStartForm, setShowStartForm] = useState(false);
 
   // New Cycle Form state
-  const [newGroupId, setNewGroupId] = useState('g_u3_maeuse');
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [newGroupId, setNewGroupId] = useState('');
+
+  useEffect(() => {
+    fetch('/api/groups').then(res => res.json()).then((data) => {
+      setGroups(data);
+      setNewGroupId(data[0]?.id ?? '');
+    }).catch(console.error);
+  }, []);
   const [newDate, setNewDate] = useState(new Date().toISOString().substring(0, 10));
   const [newStartTime, setNewStartTime] = useState('08:00');
   const [newEndTime, setNewEndTime] = useState('16:30');
@@ -139,7 +142,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm mb-6">
+    <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm mb-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
         <div className="flex items-center space-x-3">
@@ -148,16 +151,11 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="font-extrabold text-sm sm:text-base text-slate-900">
-                Einspring-Kaskade (Automatisches Durchcyceln aller Verfügbaren)
+              <h3 className="font-semibold text-sm sm:text-base text-slate-900">
+                Vertretung anfragen
               </h3>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
-                ArbZG & Rechtlicher Rahmen
-              </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Fragt nacheinander alle im gesetzlichen Rahmen verfügbaren Fachkräfte an. Sagen alle ab, entscheidet die Leitung.
-            </p>
+            <p className="text-xs text-slate-500 mt-0.5">Fragt verfügbare Fachkräfte nacheinander an. Sagen alle ab, entscheidet die Leitung.</p>
           </div>
         </div>
 
@@ -190,20 +188,18 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Gruppe</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Gruppe</label>
               <select
                 value={newGroupId}
                 onChange={(e) => setNewGroupId(e.target.value)}
                 className="w-full text-xs p-2 rounded-xl border border-slate-300 bg-white"
               >
-                <option value="g_u3_maeuse">Mäusegruppe (U3 Krippe)</option>
-                <option value="g_ue3_sonne">Sonnenschein (Ü3 Elementar)</option>
-                <option value="g_ue3_wald">Waldgruppe (Ü3 Natur)</option>
+                {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Datum</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Datum</label>
               <input
                 type="date"
                 value={newDate}
@@ -213,7 +209,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Uhrzeit</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Uhrzeit</label>
               <div className="flex items-center space-x-1">
                 <input
                   type="text"
@@ -236,7 +232,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Ausgefallener Mitarbeiter</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Ausgefallener Mitarbeiter</label>
               <select
                 value={newAbsentStaffId}
                 onChange={(e) => setNewAbsentStaffId(e.target.value)}
@@ -251,7 +247,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">Grund / Anlass</label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Grund / Anlass</label>
               <input
                 type="text"
                 value={newReason}
@@ -272,7 +268,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
             <button
               type="submit"
               disabled={actionLoading}
-              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center space-x-1"
+              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center space-x-1"
             >
               <Send className="w-3.5 h-3.5" />
               <span>Kaskade starten (Rechtsprüfung & Durchcyceln)</span>
@@ -295,9 +291,9 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                   {activeCycle.date} ({activeCycle.start_time} - {activeCycle.end_time} Uhr)
                 </span>
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                     activeCycle.status === 'IN_PROGRESS'
-                      ? 'bg-amber-100 text-amber-800 animate-pulse'
+                      ? 'bg-amber-100 text-amber-800'
                       : activeCycle.status === 'ACCEPTED'
                       ? 'bg-emerald-100 text-emerald-800'
                       : activeCycle.status === 'ALL_DECLINED'
@@ -307,11 +303,11 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                 >
                   {activeCycle.status === 'IN_PROGRESS' && '⏳ Kaskade läuft (cycelt durch)'}
                   {activeCycle.status === 'ACCEPTED' && '✓ Einspringen bestätigt'}
-                  {activeCycle.status === 'ALL_DECLINED' && '🚨 JEDER HAT NEIN GESAGT'}
-                  {activeCycle.status === 'DIRECTOR_RESOLVED' && '⚖️ Durch Leitung entschieden'}
+                  {activeCycle.status === 'ALL_DECLINED' && 'JEDER HAT NEIN GESAGT'}
+                  {activeCycle.status === 'DIRECTOR_RESOLVED' && 'Durch Leitung entschieden'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">
+              <p className="text-xs text-slate-500 mt-1">
                 Grund: {activeCycle.reason || 'Krankheitsbedingter Ausfall'} • {activeCycle.candidates.length} Mitarbeiter im rechtlichen Rahmen (ArbZG § 3 & § 5) qualifiziert
               </p>
             </div>
@@ -327,7 +323,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
 
           {/* Active Director Immediate Override ("Die Person macht das jetzt!") */}
           {activeCycle.status === 'IN_PROGRESS' && (
-            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100/60 border border-amber-300 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start space-x-2.5">
                 <div className="p-2 rounded-xl bg-amber-500 text-white shrink-0 mt-0.5">
                   <Gavel className="w-4 h-4" />
@@ -337,11 +333,11 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                     <span className="text-xs font-bold text-amber-950">
                       Direktionsrecht der Leitung (jederzeit während der Abfrage):
                     </span>
-                    <span className="px-2 py-0.2 bg-amber-200/80 text-amber-900 rounded-full text-[10px] font-bold">
+                    <span className="px-2 py-0.5 bg-amber-200/80 text-amber-900 rounded-full text-xs font-bold">
                       Sofort-Zuweisung
                     </span>
                   </div>
-                  <p className="text-[11px] text-amber-800 mt-0.5">
+                  <p className="text-xs text-amber-800 mt-0.5">
                     Die Leitung kann auch <strong>während der laufenden Abfrage</strong> jederzeit sofort bestimmen: <em>"Die Person macht das jetzt!"</em>
                   </p>
                 </div>
@@ -375,7 +371,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                 <button
                   onClick={() => handleDirectorDecide(activeCycle.id)}
                   disabled={actionLoading || !directorChosenStaffId}
-                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition-all whitespace-nowrap disabled:opacity-50 flex items-center space-x-1.5"
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold rounded-xl transition-all whitespace-nowrap disabled:opacity-50 flex items-center space-x-1.5"
                 >
                   <Gavel className="w-3.5 h-3.5" />
                   <span>Die Person macht das jetzt!</span>
@@ -388,7 +384,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
           <div>
             <div className="text-xs font-bold text-slate-700 mb-2 flex items-center justify-between">
               <span>Reihenfolge der Einspring-Anfragen (nach Rechtsprüfung & Springer-Prio):</span>
-              <span className="text-[10px] text-slate-400">
+              <span className="text-xs text-slate-400">
                 ArbZG § 3 (max. 10h) • ArbZG § 5 (11h Ruhezeit)
               </span>
             </div>
@@ -405,7 +401,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                     key={c.staff_id}
                     className={`p-3.5 rounded-2xl border transition-all ${
                       isCurrent
-                        ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20 shadow-xs'
+                        ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20'
                         : isAccepted
                         ? 'bg-emerald-50/80 border-emerald-300'
                         : isDeclined
@@ -423,17 +419,17 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                             <span className={`text-xs font-bold ${isDeclined ? 'line-through text-slate-500' : 'text-slate-900'}`}>
                               {c.name}
                             </span>
-                            <span className="text-[10px] px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded font-medium">
+                            <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-medium">
                               {c.role} • {c.qualification}
                             </span>
                             {c.is_fachkraft && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-bold">
+                              <span className="text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">
                                 Fachkraft
                               </span>
                             )}
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[10px] text-slate-500">
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1 text-xs text-slate-500">
                             <span className="text-emerald-700 font-semibold flex items-center space-x-0.5">
                               <span>✓ ArbZG § 3: {c.legal_check.total_daily_hours.toFixed(1)}h/10h</span>
                             </span>
@@ -457,27 +453,27 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                         )}
 
                         {isDeclined && (
-                          <span className="px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 text-[11px] font-semibold flex items-center space-x-1">
+                          <span className="px-2 py-0.5 rounded-lg bg-rose-100 text-rose-700 text-xs font-semibold flex items-center space-x-1">
                             <X className="w-3 h-3" />
                             <span>Hat abgelehnt</span>
                           </span>
                         )}
 
                         {isWaiting && (
-                          <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 text-[11px]">
+                          <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 text-xs">
                             In Warteschlange
                           </span>
                         )}
 
                         {isCurrent && (
                           <div className="flex items-center space-x-1.5">
-                            <span className="text-[11px] text-amber-800 font-bold animate-pulse mr-1">
+                            <span className="text-xs text-amber-800 font-bold mr-1">
                               Wird gerade angefragt...
                             </span>
                             <button
                               onClick={() => handleRespond(activeCycle.id, c.staff_id, 'ACCEPT')}
                               disabled={actionLoading}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg shadow-xs flex items-center space-x-1"
+                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg flex items-center space-x-1"
                               title="Simulation: Mitarbeiter sagt zu"
                             >
                               <Check className="w-3 h-3" />
@@ -486,7 +482,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                             <button
                               onClick={() => handleRespond(activeCycle.id, c.staff_id, 'DECLINE')}
                               disabled={actionLoading}
-                              className="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 text-[11px] font-bold rounded-lg border border-rose-300 flex items-center space-x-1"
+                              className="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-bold rounded-lg border border-rose-300 flex items-center space-x-1"
                               title="Simulation: Mitarbeiter sagt ab -> Weiter zum Nächsten"
                             >
                               <X className="w-3 h-3" />
@@ -500,7 +496,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                           <button
                             onClick={() => handleDirectAssign(activeCycle.id, c.staff_id, c.name)}
                             disabled={actionLoading}
-                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-[11px] font-bold rounded-lg shadow-xs flex items-center space-x-1 transition-all"
+                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold rounded-lg flex items-center space-x-1 transition-all"
                             title={`Leitung weist ${c.name} sofort verbindlich an ("Die Person macht das jetzt!")`}
                           >
                             <Gavel className="w-3 h-3" />
@@ -517,13 +513,13 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
 
           {/* ALL DECLINED WARNING & DIRECTOR OVERRIDE DECISION */}
           {activeCycle.status === 'ALL_DECLINED' && (
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-50 via-rose-100 to-amber-50 border-2 border-rose-400 shadow-sm space-y-3">
+            <div className="p-4 rounded-2xl bg-rose-50 border-2 border-rose-400 shadow-sm space-y-3">
               <div className="flex items-start space-x-3">
                 <div className="p-2 rounded-xl bg-rose-600 text-white shrink-0 mt-0.5">
                   <ShieldAlert className="w-5 h-5 animate-bounce" />
                 </div>
                 <div>
-                  <h4 className="text-sm font-extrabold text-rose-950">
+                  <h4 className="text-sm font-semibold text-rose-950">
                     Alle im rechtlichen Rahmen verfügbaren Mitarbeiter haben nein gesagt!
                   </h4>
                   <p className="text-xs text-rose-800 mt-0.5">
@@ -534,7 +530,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
               </div>
 
               {/* Director Decision Form */}
-              <div className="bg-white/80 backdrop-blur-xs p-3.5 rounded-xl border border-rose-200 space-y-3">
+              <div className="bg-white/80 backdrop-blur-sm p-3.5 rounded-xl border border-rose-200 space-y-3">
                 <div className="text-xs font-bold text-slate-800 flex items-center space-x-1.5">
                   <Gavel className="w-4 h-4 text-rose-600" />
                   <span>Verbindliche Direktions-Entscheidung der Einrichtungsleitung:</span>
@@ -542,7 +538,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
                       Mitarbeiter für das Einspringen anweisen:
                     </label>
                     <select
@@ -560,7 +556,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
                       Begründung / Weisungsnotiz der Leitung:
                     </label>
                     <input
@@ -576,7 +572,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                   <button
                     onClick={() => handleDirectorDecide(activeCycle.id)}
                     disabled={actionLoading || !directorChosenStaffId}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center space-x-1.5 disabled:opacity-50"
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-xs font-bold rounded-xl transition-all flex items-center space-x-1.5 disabled:opacity-50"
                   >
                     <Gavel className="w-3.5 h-3.5" />
                     <span>Verbindlich anweisen & Schicht zuteilen</span>
@@ -596,7 +592,7 @@ export const EinspringKaskadeWidget: React.FC<EinspringKaskadeWidgetProps> = ({
                   {activeCycle.director_note && ` ("${activeCycle.director_note}")`}
                 </span>
               </div>
-              <span className="font-bold text-purple-800 text-[11px] shrink-0">
+              <span className="font-bold text-purple-800 text-xs shrink-0">
                 Schicht eingebucht ✓
               </span>
             </div>

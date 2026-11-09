@@ -8,17 +8,13 @@ import {
   ShieldAlert, 
   Phone, 
   Calendar, 
-  Clock, 
   HeartPulse, 
   UserCheck, 
   X, 
   Check, 
-  Eye, 
-  FileText,
   Shield,
   Activity
 } from 'lucide-react';
-import { format } from 'date-fns';
 
 interface ChildrenManagementProps {
   groups: Group[];
@@ -125,11 +121,9 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
             <Users className="w-5 h-5 text-emerald-600" />
-            <span>Digitale Kinder- & Stammdatenverwaltung</span>
+            <span>Kinder & Familien</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Gesetzliche Kinderakten, Notfallkontakte, Allergie-Wächter & Abholberechtigungen ({children.length} Kinder aufgenommen)
-          </p>
+          <p className="text-xs text-slate-500 mt-1">{children.length} Kinder mit Notfallkontakten, Allergien und Abholberechtigungen.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -138,7 +132,7 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
             <button
               onClick={() => setSelectedGroup('ALL')}
               className={`px-3 py-1.5 rounded-lg transition-all ${
-                selectedGroup === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                selectedGroup === 'ALL' ? 'bg-white text-slate-900' : 'text-slate-500 hover:text-slate-800'
               }`}
             >
               Alle ({children.length})
@@ -148,7 +142,7 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
                 key={g.id}
                 onClick={() => setSelectedGroup(g.id)}
                 className={`px-3 py-1.5 rounded-lg transition-all ${
-                  selectedGroup === g.id ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                  selectedGroup === g.id ? 'bg-white text-slate-900' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
                 {g.name.split(' ')[0]}
@@ -171,7 +165,7 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
           {/* Add Child Button */}
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-all"
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-all"
           >
             <Plus className="w-4 h-4" />
             <span>Neues Kind aufnehmen</span>
@@ -198,25 +192,25 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
               >
                 {/* Status bar top */}
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                     {c.group_name || 'Gruppe'}
                   </span>
 
                   <div className="flex items-center space-x-1">
                     {isPresent && (
-                      <span className="inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className="inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
                         <UserCheck className="w-3 h-3" />
                         <span>Anwesend ({c.check_in_time || '08:00'})</span>
                       </span>
                     )}
                     {isSick && (
-                      <span className="inline-flex items-center space-x-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                      <span className="inline-flex items-center space-x-1 text-xs font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
                         <Activity className="w-3 h-3" />
                         <span>Krank</span>
                       </span>
                     )}
                     {!isPresent && !isSick && (
-                      <span className="text-[11px] font-semibold text-slate-400">
+                      <span className="text-xs font-semibold text-slate-400">
                         Nicht erfasst
                       </span>
                     )}
@@ -248,14 +242,14 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
                       <span className="truncate">Allergie: {c.allergies?.join(', ')}</span>
                     </div>
                   ) : (
-                    <div className="text-[11px] text-slate-400 flex items-center space-x-1">
+                    <div className="text-xs text-slate-400 flex items-center space-x-1">
                       <Check className="w-3 h-3 text-emerald-500" />
                       <span>Keine bekannten Allergien</span>
                     </div>
                   )}
 
                   {hasEmergencyNote && (
-                    <div className="flex items-center space-x-1.5 text-xs text-rose-800 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 font-bold animate-pulse">
+                    <div className="flex items-center space-x-1.5 text-xs text-rose-800 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 font-bold">
                       <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                       <span className="truncate">Notfall-Medikament hinterlegt</span>
                     </div>
@@ -269,12 +263,12 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
 
       {/* Modal: Full Child Details / Akte */}
       {selectedChild && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
               <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center font-extrabold text-emerald-800 text-base">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center font-semibold text-emerald-800 text-base">
                   {selectedChild.child.first_name[0]}{selectedChild.child.last_name[0]}
                 </div>
                 <div>
@@ -354,7 +348,7 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
                       <div>
                         <span className="font-bold text-slate-900">{ec.name}</span>
                         <span className="text-slate-500 ml-1.5">({ec.relationship})</span>
-                        <span className="ml-2 px-1.5 py-0.2 bg-emerald-50 text-emerald-700 font-bold rounded">
+                        <span className="ml-2 px-1.5 py-0.5 bg-emerald-50 text-emerald-700 font-bold rounded">
                           Priorität {ec.priority}
                         </span>
                       </div>
@@ -394,24 +388,24 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
                           </span>
                           <span className="text-slate-500">({pa.relationship})</span>
                           {pa.is_forbidden ? (
-                            <span className="px-2 py-0.5 bg-rose-600 text-white font-bold rounded-full text-[10px]">
-                              ⚠️ ABHOLVERBOT
+                            <span className="px-2 py-0.5 bg-rose-600 text-white font-bold rounded-full text-xs">
+                              ABHOLVERBOT
                             </span>
                           ) : (
-                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">
+                            <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-xs">
                               Berechtigt
                             </span>
                           )}
                         </div>
                         {pa.notes && (
-                          <p className={`text-[11px] mt-1 ${pa.is_forbidden ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>
+                          <p className={`text-xs mt-1 ${pa.is_forbidden ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>
                             {pa.notes}
                           </p>
                         )}
                       </div>
 
                       {pa.phone && (
-                        <span className="text-slate-600 font-mono text-[11px]">{pa.phone}</span>
+                        <span className="text-slate-600 font-mono text-xs">{pa.phone}</span>
                       )}
                     </div>
                   ))}
@@ -424,8 +418,8 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
 
       {/* Modal: Add Child */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
                 <Plus className="w-5 h-5 text-emerald-600" />
@@ -539,7 +533,7 @@ export const ChildrenManagement: React.FC<ChildrenManagementProps> = ({ groups, 
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold shadow-xs transition-colors"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold transition-colors"
                 >
                   Kind anlegen
                 </button>

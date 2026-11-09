@@ -1,26 +1,13 @@
+import { notifyError } from '../notify';
 import React, { useState, useEffect } from 'react';
 import { 
-  Users, 
-  DollarSign, 
-  FileSpreadsheet, 
   Download, 
   Plus, 
   CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  Check, 
   X, 
   Sparkles, 
-  Calendar, 
   Baby, 
   Landmark, 
-  ShieldCheck, 
-  FileText, 
-  Filter, 
-  Award,
-  ChevronRight,
-  TrendingUp,
-  Receipt
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -76,24 +63,22 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
   }, []);
 
   // 1-Click Intake from Waitlist
-  const handleAcceptApplication = async (id: string, groupType: string) => {
+  const handleAcceptApplication = async (id: string) => {
     try {
       const res = await fetch(`/api/waitlist/${id}/accept-and-enroll`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          group_id: groupType === 'U3' ? 'g_u3_maeuse' : 'g_ue3_sonne'
-        })
+        body: '{}'
       });
       const data = await res.json();
       if (res.ok) {
         showToast(data.message);
         await loadData();
       } else {
-        alert(data.error);
+        notifyError(data.error);
       }
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -129,10 +114,10 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
         setParentEmail('');
         await loadData();
       } else {
-        alert(data.error);
+        notifyError(data.error);
       }
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -150,18 +135,11 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
         showToast(`✓ ${data.message}`);
         await loadData();
       } else {
-        alert(data.error);
+        notifyError(data.error);
       }
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
-  };
-
-  // Export SEPA XML
-  const handleExportSepa = () => {
-    const monthStr = format(new Date(), 'yyyy-MM');
-    window.open(`/api/billing/export-sepa-xml?month=${monthStr}`, '_blank');
-    showToast('✓ SEPA Lastschrift XML (pain.008) wird heruntergeladen.');
   };
 
   // Export Youth Office CSV
@@ -178,16 +156,14 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
   return (
     <div className="space-y-6">
       {/* Top Banner */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="flex items-center space-x-3.5">
           <div className="p-3 bg-emerald-600 text-white rounded-2xl shadow-sm">
             <Landmark className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Verwaltung, Finanzen & Warteliste (Modul E)</h2>
-            <p className="text-xs text-slate-500">
-              Warteliste mit Punktevergabe, SEPA-Lastschriften für Gebühren & Essensgeld, Behördenstatistik (§ 98 SGB VIII).
-            </p>
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Finanzen & Warteliste</h2>
+            <p className="text-xs text-slate-500">Warteliste, Monatsabrechnung und Jugendamt-Statistik.</p>
           </div>
         </div>
 
@@ -199,7 +175,7 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
               subTab === 'WAITLIST' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            📋 Warteliste & Punkte ({waitlist.filter(w => w.status === 'WAITING').length})
+            Warteliste ({waitlist.filter(w => w.status === 'WAITING').length})
           </button>
           <button
             onClick={() => setSubTab('BILLING')}
@@ -207,7 +183,7 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
               subTab === 'BILLING' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            💶 Abrechnung & SEPA
+            Abrechnung
           </button>
           <button
             onClick={() => setSubTab('AUTHORITIES')}
@@ -215,7 +191,7 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
               subTab === 'AUTHORITIES' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            🏛️ Jugendamt & Statistik
+            Jugendamt & Statistik
           </button>
         </div>
       </div>
@@ -248,7 +224,7 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
 
             <button
               onClick={() => setShowApplyModal(true)}
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center space-x-1.5"
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
               <span>Voranmeldung erfassen</span>
@@ -256,9 +232,9 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
           </div>
 
           {/* List of Applications */}
-          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs">
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-xs tracking-wider">
                 <tr>
                   <th className="px-5 py-3.5">Rang & Punkte</th>
                   <th className="px-5 py-3.5">Kind & Geburtsdatum</th>
@@ -280,42 +256,42 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
                           <span className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-600 text-xs">
                             #{idx + 1}
                           </span>
-                          <span className="px-2.5 py-1 rounded-xl bg-indigo-100 text-indigo-900 font-black text-xs">
+                          <span className="px-2.5 py-1 rounded-xl bg-indigo-100 text-indigo-900 font-semibold text-xs">
                             {app.points} Pkt.
                           </span>
                         </div>
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-bold text-slate-900">{app.child_first_name} {app.child_last_name}</div>
-                        <div className="text-[11px] text-slate-400">Geb. {app.birth_date} • {app.desired_group_type}</div>
+                        <div className="text-xs text-slate-400">Geb. {app.birth_date} • {app.desired_group_type}</div>
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-semibold text-slate-800">{app.parent_name}</div>
-                        <div className="text-[11px] text-slate-500">{app.parent_email} • {app.parent_phone}</div>
+                        <div className="text-xs text-slate-500">{app.parent_email} • {app.parent_phone}</div>
                       </td>
                       <td className="px-5 py-4">
                         <div className="font-bold text-slate-900">{app.desired_hours} Std. / Woche</div>
-                        <div className="text-[11px] text-slate-400">Ab {app.desired_start_date}</div>
+                        <div className="text-xs text-slate-400">Ab {app.desired_start_date}</div>
                       </td>
                       <td className="px-5 py-4">
                         <div className="flex flex-wrap gap-1">
                           {app.has_sibling === 1 && (
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-bold">
                               +5 Geschwister
                             </span>
                           )}
                           {app.is_single_parent === 1 && (
-                            <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
+                            <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-xs font-bold">
                               +4 Alleinerz.
                             </span>
                           )}
                           {app.in_catchment_area === 1 && (
-                            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-bold">
+                            <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-xs font-bold">
                               +3 Einzug
                             </span>
                           )}
                           {app.is_employed === 1 && (
-                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                            <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-bold">
                               +3 Berufstätig
                             </span>
                           )}
@@ -323,16 +299,16 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
                       </td>
                       <td className="px-5 py-4">
                         {isAccepted ? (
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold flex items-center space-x-1 max-w-fit">
+                          <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center space-x-1 max-w-fit">
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>Aufgenommen</span>
                           </span>
                         ) : isOffered ? (
-                          <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">
+                          <span className="px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold">
                             Platz angeboten
                           </span>
                         ) : (
-                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-[11px] font-semibold">
+                          <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
                             Wartend
                           </span>
                         )}
@@ -340,10 +316,10 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
                       <td className="px-5 py-4 text-right">
                         {!isAccepted && (
                           <button
-                            onClick={() => handleAcceptApplication(app.id, app.desired_group_type)}
-                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors"
+                            onClick={() => handleAcceptApplication(app.id)}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors"
                           >
-                            1-Klick Platzzusage
+                            Platzzusage
                           </button>
                         )}
                       </td>
@@ -356,10 +332,10 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
         </div>
       )}
 
-      {/* TAB 2: ABRECHNUNG & SEPA LASTSCHRIFTEN */}
+      {/* TAB 2: ABRECHNUNG */}
       {subTab === 'BILLING' && (
         <div className="space-y-6">
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div>
               <span className="text-xs font-bold text-emerald-600 uppercase">Monatsabrechnung</span>
               <h3 className="text-lg font-bold text-slate-900">Betreuungsgebühren & Essensgeld für {format(new Date(), 'MMMM yyyy')}</h3>
@@ -371,26 +347,18 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
             <div className="flex items-center space-x-2">
               <button
                 onClick={handleGenerateInvoices}
-                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center space-x-1.5"
+                className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5"
               >
                 <Sparkles className="w-4 h-4 text-emerald-400" />
                 <span>Monat neu berechnen</span>
-              </button>
-
-              <button
-                onClick={handleExportSepa}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors flex items-center space-x-1.5"
-              >
-                <Download className="w-4 h-4" />
-                <span>SEPA XML exportieren (pain.008)</span>
               </button>
             </div>
           </div>
 
           {/* Invoices List */}
-          <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-xs">
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px]">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-xs">
                 <tr>
                   <th className="px-5 py-3.5">Rechnungs-ID</th>
                   <th className="px-5 py-3.5">Familie & Kind</th>
@@ -398,7 +366,7 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
                   <th className="px-5 py-3.5">Grundgebühr</th>
                   <th className="px-5 py-3.5">Essensgeld (Tage)</th>
                   <th className="px-5 py-3.5">Gesamtbetrag</th>
-                  <th className="px-5 py-3.5">Status & SEPA</th>
+                  <th className="px-5 py-3.5">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -407,20 +375,20 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
                     <td className="px-5 py-4 font-mono font-bold text-slate-900">{inv.id}</td>
                     <td className="px-5 py-4">
                       <div className="font-bold text-slate-900">{inv.child_first_name} {inv.child_last_name}</div>
-                      <div className="text-[11px] text-slate-400">{inv.parent_name} • {inv.group_name}</div>
+                      <div className="text-xs text-slate-400">{inv.parent_name} • {inv.group_name}</div>
                     </td>
                     <td className="px-5 py-4 font-bold text-slate-800">{inv.care_hours}h / Wo.</td>
                     <td className="px-5 py-4 font-semibold text-slate-700">{inv.base_care_fee.toFixed(2)} €</td>
                     <td className="px-5 py-4">
                       <span className="font-semibold text-slate-900">{inv.meal_fee.toFixed(2)} €</span>
-                      <span className="text-[11px] text-slate-400 ml-1.5">({inv.meal_days_counted} Tage)</span>
+                      <span className="text-xs text-slate-400 ml-1.5">({inv.meal_days_counted} Tage)</span>
                     </td>
                     <td className="px-5 py-4">
-                      <span className="font-black text-emerald-700 text-sm">{inv.total_amount.toFixed(2)} €</span>
+                      <span className="font-semibold text-emerald-700 text-sm">{inv.total_amount.toFixed(2)} €</span>
                     </td>
                     <td className="px-5 py-4">
-                      <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
-                        {inv.status === 'SEPA_EXPORTED' ? '✓ SEPA generiert' : 'Offen'}
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold">
+                        {inv.status === 'SEPA_EXPORTED' ? 'Abgerechnet' : 'Offen'}
                       </span>
                     </td>
                   </tr>
@@ -434,7 +402,7 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
       {/* TAB 3: JUGENDAMT & BEHÖRDENSTATISTIK */}
       {subTab === 'AUTHORITIES' && report && (
         <div className="space-y-6">
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div>
               <span className="text-xs font-bold text-blue-600 uppercase">Behördenmeldungen</span>
               <h3 className="text-lg font-bold text-slate-900">Stichtagsmeldung nach § 98 SGB VIII & KiBiz</h3>
@@ -454,9 +422,9 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
 
           {/* Stats KPI Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200">
               <span className="text-xs font-bold text-slate-400 uppercase">Belegte Plätze</span>
-              <div className="text-2xl font-black text-slate-900 mt-1">
+              <div className="text-2xl font-semibold text-slate-900 mt-1">
                 {report.belegte_plaetze} / {report.betriebserlaubnis_plaetze}
               </div>
               <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full mt-2 inline-block">
@@ -464,9 +432,9 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
               </span>
             </div>
 
-            <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200">
               <span className="text-xs font-bold text-slate-400 uppercase">U3-Kinder (Krippe)</span>
-              <div className="text-2xl font-black text-indigo-600 mt-1">
+              <div className="text-2xl font-semibold text-indigo-600 mt-1">
                 {report.age_distribution.total_u3} Kinder
               </div>
               <p className="text-xs text-slate-400 mt-1">
@@ -474,17 +442,17 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
               </p>
             </div>
 
-            <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200">
               <span className="text-xs font-bold text-slate-400 uppercase">Ü3-Kinder (Elementar)</span>
-              <div className="text-2xl font-black text-amber-600 mt-1">
+              <div className="text-2xl font-semibold text-amber-600 mt-1">
                 {report.age_distribution.total_ue3} Kinder
               </div>
               <p className="text-xs text-slate-400 mt-1">Regelkindergarten (3 bis 6 Jahre)</p>
             </div>
 
-            <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200">
               <span className="text-xs font-bold text-slate-400 uppercase">Gesetzl. Fachkraftquote</span>
-              <div className="text-2xl font-black text-emerald-600 mt-1">
+              <div className="text-2xl font-semibold text-emerald-600 mt-1">
                 {report.staffing_summary.fachkraft_quote_percent}%
               </div>
               <span className="text-xs font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full mt-2 inline-block">
@@ -497,8 +465,8 @@ export const FinanceAndWaitlistView: React.FC<FinanceAndWaitlistViewProps> = ({ 
 
       {/* MODAL: VORANMELDUNG ERFASSEN */}
       {showApplyModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden animate-scale-up">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-100 overflow-hidden">
             <div className="p-6 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-2xl">

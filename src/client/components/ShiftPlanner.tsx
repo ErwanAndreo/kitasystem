@@ -1,12 +1,13 @@
+import { notifyError } from '../notify';
 import React, { useState, useEffect } from 'react';
-import { Shift, Staff, Group, ShiftTemplate, StaffWish, KitaClosure } from '../types';
+import { Shift, Staff, Group, ShiftTemplate, StaffWish, KitaClosure, Excursion } from '../types';
+import { GroupCalendar } from './GroupCalendar';
 import { 
   ChevronLeft, 
   ChevronRight, 
   Plus, 
   Trash2, 
   Clock, 
-  User, 
   AlertTriangle,
   Calendar,
   Filter,
@@ -18,17 +19,14 @@ import {
   Printer,
   Lightbulb,
   X,
-  FileText,
   CheckCircle2,
   Copy,
+  RefreshCw,
   GripVertical,
   Sliders,
-  Settings,
   Edit3,
   PanelRightClose,
-  PanelRightOpen,
   Search,
-  ShieldAlert,
   Info
 } from 'lucide-react';
 import { format, addDays, startOfWeek, subWeeks, addWeeks, getISOWeek } from 'date-fns';
@@ -59,6 +57,8 @@ interface ShiftPlannerProps {
     role_override?: string;
   }) => Promise<any>;
   onDeleteShift: (id: string) => Promise<void>;
+  onReplan: (scope: 'TODAY' | 'WEEK', weekStart: string) => Promise<void>;
+  specialsVersion: number;
 }
 
 export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
@@ -69,7 +69,9 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   setCurrentDate,
   onAddShift,
   onUpdateShift,
-  onDeleteShift
+  onDeleteShift,
+  onReplan,
+  specialsVersion
 }) => {
   const [selectedGroup, setSelectedGroup] = useState<string>('ALL');
   const [modalOpen, setModalOpen] = useState(false);
@@ -77,6 +79,17 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   const [templates, setTemplates] = useState<ShiftTemplate[]>([]);
   const [wishes, setWishes] = useState<StaffWish[]>([]);
   const [closures, setClosures] = useState<KitaClosure[]>([]);
+  const [excursions, setExcursions] = useState<Excursion[]>([]);
+  const [calendarView, setCalendarView] = useState<'PERSON' | 'GROUP'>('PERSON');
+
+  useEffect(() => {
+    Promise.all([fetch('/api/closures'), fetch('/api/excursions')])
+      .then(async ([c, e]) => {
+        setClosures(await c.json());
+        setExcursions(await e.json());
+      })
+      .catch(err => notifyError(err.message));
+  }, [specialsVersion]);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [copyLoading, setCopyLoading] = useState(false);
 
@@ -137,6 +150,53 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 });
   const weekDays = [0, 1, 2, 3, 4].map(offset => addDays(weekStart, offset));
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const nowStr = format(new Date(), 'HH:mm');
+  const mondayKey = format(weekDays[0], 'yyyy-MM-dd');
+  const fridayKey = format(weekDays[4], 'yyyy-MM-dd');
+  const [dayStatus, setDayStatus] = useState<Record<string, boolean>>({});
+  const [replanning, setReplanning] = useState(false);
+  const isFinished = (sh: Shift) => sh.date < todayStr || (sh.date === todayStr && sh.end_time <= nowStr);
+
+  useEffect(() => {
+    fetch(`/api/roster-days?start=${mondayKey}&end=${fridayKey}`)
+      .then(r => r.json())
+      .then(setDayStatus)
+      .catch(e => notifyError(e.message));
+  }, [mondayKey, fridayKey]);
+
+  const saveDayStatus = async (date: string, followed: boolean) => {
+    const next = dayStatus[date] === followed ? null : followed;
+    try {
+      const res = await fetch(`/api/roster-days/${date}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ followed: next })
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      setDayStatus(prev => {
+        const { [date]: _old, ...rest } = prev;
+        return next === null ? rest : { ...rest, [date]: next };
+      });
+    } catch (e: any) {
+      notifyError(e.message);
+    }
+  };
+
+  const replan = async (scope: 'TODAY' | 'WEEK') => {
+    const question = scope === 'TODAY'
+      ? 'Alles ab jetzt für heute neu planen? Einzelne Änderungen an noch nicht begonnenen Schichten gehen verloren.'
+      : 'Diese Woche aus dem Dienstplan neu laden? Einzelne Änderungen an kommenden Schichten gehen verloren.';
+    if (!confirm(question)) return;
+    setReplanning(true);
+    try {
+      await onReplan(scope, mondayKey);
+    } catch (e: any) {
+      notifyError(e.message);
+    } finally {
+      setReplanning(false);
+    }
+  };
   const weekNumber = getISOWeek(currentDate);
 
   // Load Settings from Backend
@@ -201,7 +261,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || 'Fehler beim Kopieren der Vorwoche');
+        notifyError(data.error || 'Fehler beim Kopieren der Vorwoche');
       } else {
         let msg = `Vorwoche erfolgreich übernommen: ${data.copied_count} Schichten kopiert!`;
         if (data.skipped_vacation_count > 0) {
@@ -215,7 +275,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         window.location.reload();
       }
     } catch (err: any) {
-      alert('Netzwerkfehler: ' + err.message);
+      notifyError('Netzwerkfehler: ' + err.message);
     } finally {
       setCopyLoading(false);
     }
@@ -245,6 +305,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
   });
 
   const handleOpenNewShift = (staffId?: string, dateStr?: string) => {
+    if (dateStr && dateStr < todayStr) return;
     const sObj = staff.find(s => s.id === (staffId || staff[0]?.id));
     const targetDate = dateStr || format(new Date(), 'yyyy-MM-dd');
     
@@ -280,15 +341,19 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
   const handleSaveShift = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await onAddShift(modalData);
-    if (res?.warning) {
-      setRecentLegalWarning({
-        title: 'Rechtlicher Rahmen (ArbZG)',
-        details: res.warning,
-        shiftId: res.id
-      });
+    try {
+      const res = await onAddShift(modalData);
+      if (res?.warning) {
+        setRecentLegalWarning({
+          title: 'Rechtlicher Rahmen (ArbZG)',
+          details: res.warning,
+          shiftId: res.id
+        });
+      }
+      setModalOpen(false);
+    } catch (err: any) {
+      notifyError(err.message);
     }
-    setModalOpen(false);
   };
 
   // Drag and Drop Handler for Day Cells
@@ -358,6 +423,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
   // Open Edit Shift Popover / Modal
   const handleOpenEditShift = (sh: Shift) => {
+    if (isFinished(sh)) return;
     setEditingShift(sh);
     setEditFormData({
       id: sh.id,
@@ -366,7 +432,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
       date: sh.date,
       start_time: sh.start_time,
       end_time: sh.end_time,
-      break_minutes: sh.break_minutes || 30,
+      break_minutes: sh.break_minutes ?? 30,
       role_override: sh.role_override || ''
     });
     setEditModalOpen(true);
@@ -378,13 +444,18 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
     if (!editingShift) return;
 
     if (onUpdateShift) {
-      const res = await onUpdateShift(editingShift.id, editFormData);
-      if (res?.warning) {
-        setRecentLegalWarning({
-          title: `ArbZG-Hinweis für Schicht (${editingShift.staff_name})`,
-          details: res.warning,
-          shiftId: editingShift.id
-        });
+      try {
+        const res = await onUpdateShift(editingShift.id, editFormData);
+        if (res?.warning) {
+          setRecentLegalWarning({
+            title: `ArbZG-Hinweis für Schicht (${editingShift.staff_name})`,
+            details: res.warning,
+            shiftId: editingShift.id
+          });
+        }
+      } catch (err: any) {
+        notifyError(err.message);
+        return;
       }
     }
     setEditModalOpen(false);
@@ -426,7 +497,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         setSettingsModalOpen(false);
       }
     } catch (err: any) {
-      alert('Fehler beim Speichern der Einstellungen: ' + err.message);
+      notifyError('Fehler beim Speichern der Einstellungen: ' + err.message);
     } finally {
       setSavingSettings(false);
     }
@@ -443,15 +514,43 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
         <div>
           <h2 className="text-base font-bold text-slate-900 flex items-center space-x-2">
             <Calendar className="w-4 h-4 text-emerald-600" />
-            <span>Wochendienstplan & Drag & Drop Schichteinsatz</span>
+            <span>Einsatzplan</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Mitarbeiter aus rechter Liste per Drag & Drop reinziehen • Standardarbeitszeit {defaultDurationHours} Std. (in Einstellungen anpassbar)
-          </p>
+          <p className="text-xs text-slate-500 mt-0.5">Der tatsächliche Plan: entsteht aus dem Dienstplan. Hier landen Krankheit, Vertretungen und einzelne Änderungen.</p>
         </div>
 
         {/* Navigation, Filter, Print & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => replan('TODAY')}
+            disabled={replanning}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold disabled:opacity-60"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Heute neu planen</span>
+          </button>
+          <button
+            onClick={() => replan('WEEK')}
+            disabled={replanning}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-lg border border-slate-300 hover:bg-slate-100 text-slate-800 text-sm font-semibold disabled:opacity-60"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Woche neu laden</span>
+          </button>
+
+          <div className="flex rounded-lg border border-slate-300 overflow-hidden text-sm" role="group" aria-label="Ansicht">
+            {([['PERSON', 'Pro Person'], ['GROUP', 'Pro Gruppe']] as const).map(([value, text]) => (
+              <button
+                key={value}
+                onClick={() => setCalendarView(value)}
+                aria-pressed={calendarView === value}
+                className={`h-9 px-3 font-medium ${calendarView === value ? 'bg-emerald-100 text-emerald-900' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
+              >
+                {text}
+              </button>
+            ))}
+          </div>
+
           {/* Group Filter */}
           <div className="flex items-center space-x-1 bg-slate-100 px-2 py-1 rounded-xl text-xs">
             <Filter className="w-3.5 h-3.5 text-slate-500" />
@@ -505,7 +604,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border ${
               sidebarOpen
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
                 : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
             }`}
             title="Mitarbeiter-Pool Sidebar (Drag & Drop) ein- oder ausblenden"
@@ -538,7 +637,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
           {/* Add shift */}
           <button
             onClick={() => handleOpenNewShift()}
-            className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-semibold shadow-xs transition-all active:scale-95"
+            className="flex items-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
           >
             <Plus className="w-4 h-4" />
             <span>Schicht eintragen</span>
@@ -548,20 +647,20 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
       {/* Recent Legal / ArbZG Warning Alert Banner (Nicht blockierend!) */}
       {recentLegalWarning && (
-        <div className="mt-4 p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start justify-between shadow-2xs animate-fade-in">
+        <div className="mt-4 p-3.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-950 flex items-start justify-between">
           <div className="flex items-start space-x-2.5">
             <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <div className="font-bold flex items-center space-x-2">
                 <span>{recentLegalWarning.title}</span>
-                <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded font-semibold">
+                <span className="text-xs bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-semibold">
                   Eintragung autorisiert (nicht blockiert)
                 </span>
               </div>
               <p className="mt-0.5 text-amber-900 leading-relaxed font-medium">
                 {recentLegalWarning.details}
               </p>
-              <div className="text-[11px] text-amber-800 mt-1 flex items-center space-x-1">
+              <div className="text-xs text-amber-800 mt-1 flex items-center space-x-1">
                 <Info className="w-3.5 h-3.5 shrink-0" />
                 <span>Gemäß Anforderung prüft das System den rechtlichen Rahmen und meldet Hinweise, verhindert das Eintragen jedoch nicht.</span>
               </div>
@@ -593,6 +692,16 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
       <div className="flex flex-col lg:flex-row gap-5 mt-4 items-start">
         {/* Left Column: Calendar Roster Grid */}
         <div className="flex-1 w-full overflow-x-auto min-w-0">
+          {calendarView === 'GROUP' ? (
+            <GroupCalendar
+              groups={groups.filter(g => selectedGroup === 'ALL' || g.id === selectedGroup)}
+              shifts={shifts}
+              weekDays={weekDays}
+              closures={closures}
+              excursions={excursions}
+              onOpenShift={handleOpenEditShift}
+            />
+          ) : (
           <table className="w-full border-collapse min-w-[780px]">
             <thead>
               <tr>
@@ -618,17 +727,42 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                       } ${idx === 4 ? 'rounded-r-xl' : ''}`}
                     >
                       <div>{format(day, 'EEEE', { locale: de })}</div>
-                      <div className="text-[11px] font-normal text-slate-400">{format(day, 'dd.MM.')}</div>
+                      <div className="text-xs font-normal text-slate-400">{format(day, 'dd.MM.')}</div>
                       {dayClosure && (
                         <div
-                          className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold ${
                             dayClosure.type === 'KONZEPTIONSTAG'
                               ? 'bg-purple-200 text-purple-900'
                               : 'bg-rose-200 text-rose-900'
                           }`}
                           title={dayClosure.notes || dayClosure.title}
                         >
-                          {dayClosure.type === 'KONZEPTIONSTAG' ? '📚 Teamtag' : '🏫 Schließtag'}
+                          {dayClosure.type === 'KONZEPTIONSTAG' ? 'Teamtag' : 'Schließtag'}
+                        </div>
+                      )}
+                      {excursions.filter(x => x.date === dayStr).map(x => (
+                        <div key={x.id} className="mt-1 normal-case tracking-normal font-medium text-indigo-700">
+                          Wandertag {x.group_name.split(' ')[0]} ({x.staff_count})
+                        </div>
+                      ))}
+                      {dayStr <= todayStr && (
+                        <div className="mt-1.5 flex justify-center gap-1 normal-case tracking-normal font-medium">
+                          <button
+                            onClick={() => saveDayStatus(dayStr, true)}
+                            aria-pressed={dayStatus[dayStr] === true}
+                            title="Der Tag lief wie geplant"
+                            className={`px-1.5 py-0.5 rounded-md border text-xs ${dayStatus[dayStr] === true ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
+                          >
+                            So gemacht
+                          </button>
+                          <button
+                            onClick={() => saveDayStatus(dayStr, false)}
+                            aria-pressed={dayStatus[dayStr] === false}
+                            title="Der Tag lief anders als geplant"
+                            className={`px-1.5 py-0.5 rounded-md border text-xs ${dayStatus[dayStr] === false ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'}`}
+                          >
+                            Nicht so
+                          </button>
                         </div>
                       )}
                     </th>
@@ -646,7 +780,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     <td className="p-3 w-52">
                       <div className="flex items-start space-x-2.5">
                         <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shadow-xs shrink-0 mt-0.5"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0 mt-0.5"
                           style={{ backgroundColor: person.color }}
                         >
                           {person.avatar}
@@ -655,7 +789,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                           <div className="text-xs font-bold text-slate-900 truncate">
                             {person.name}
                           </div>
-                          <div className="flex items-center space-x-1 text-[10px] text-slate-400 mt-0.5">
+                          <div className="flex items-center space-x-1 text-xs text-slate-400 mt-0.5">
                             <span className={isFachkraft ? 'text-blue-600 font-semibold' : 'text-slate-500'}>
                               {person.role === 'LEITUNG' ? 'Leitung' : isFachkraft ? 'Fachkraft' : 'Ergänzungskraft'}
                             </span>
@@ -666,29 +800,29 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                           {/* Personelle Skills & Rollen-Pills */}
                           <div className="flex flex-wrap items-center gap-1 mt-1">
                             {person.role === 'LEITUNG' && (
-                              <span title="Einrichtungsleitung" className="inline-flex items-center px-1 py-0.2 rounded bg-indigo-100 text-indigo-700 text-[9px] font-bold">
+                              <span title="Einrichtungsleitung" className="inline-flex items-center px-1 py-0.5 rounded bg-indigo-100 text-indigo-700 text-xs font-bold">
                                 ⭐ Leitung
                               </span>
                             )}
                             {person.role === 'SPRINGER' && (
-                              <span title="Dedizierte Springerin" className="inline-flex items-center px-1 py-0.2 rounded bg-emerald-100 text-emerald-700 text-[9px] font-bold">
-                                🔄 Springer
+                              <span title="Dedizierte Springerin" className="inline-flex items-center px-1 py-0.5 rounded bg-emerald-100 text-emerald-700 text-xs font-bold">
+                                Springer
                               </span>
                             )}
                             {person.skills?.includes('U3_QUALIFIKATION') && (
-                              <span title="U3-Qualifikation" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-purple-100 text-purple-700 text-[9px] font-bold">
+                              <span title="U3-Qualifikation" className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded bg-purple-100 text-purple-700 text-xs font-bold">
                                 <Baby className="w-2.5 h-2.5" />
                                 <span>U3</span>
                               </span>
                             )}
                             {person.skills?.includes('ERSTE_HILFE_KIND') && (
-                              <span title="Ersthelfer am Kind" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-rose-100 text-rose-700 text-[9px] font-bold">
+                              <span title="Ersthelfer am Kind" className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded bg-rose-100 text-rose-700 text-xs font-bold">
                                 <HeartPulse className="w-2.5 h-2.5" />
                                 <span>EH</span>
                               </span>
                             )}
                             {person.skills?.includes('INKLUSION') && (
-                              <span title="Inklusionsfachkraft" className="inline-flex items-center space-x-0.5 px-1 py-0.2 rounded bg-amber-100 text-amber-700 text-[9px] font-bold">
+                              <span title="Inklusionsfachkraft" className="inline-flex items-center space-x-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 text-xs font-bold">
                                 <GraduationCap className="w-2.5 h-2.5" />
                                 <span>Inkl</span>
                               </span>
@@ -708,6 +842,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                         w => w.staff_id === person.id && w.date === dayStr
                       );
                       const isHoveredDrop = dragOverCell?.staffId === person.id && dragOverCell?.date === dayStr;
+                      const isPastDay = dayStr < todayStr;
 
                       return (
                         <td 
@@ -718,6 +853,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                               : ''
                           }`}
                           onDragOver={(e) => {
+                            if (isPastDay) return;
                             e.preventDefault();
                             e.dataTransfer.dropEffect = 'copy';
                             if (!dragOverCell || dragOverCell.staffId !== person.id || dragOverCell.date !== dayStr) {
@@ -727,7 +863,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                           onDragLeave={() => {
                             setDragOverCell(null);
                           }}
-                          onDrop={(e) => handleCellDrop(e, person.id, dayStr)}
+                          onDrop={(e) => !isPastDay && handleCellDrop(e, person.id, dayStr)}
                         >
                           {/* If staff member submitted a wish for this day */}
                           {dayWish && dayShifts.length === 0 && (
@@ -736,21 +872,23 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                               className="mb-1 p-1 bg-amber-50 border border-amber-200 rounded-lg text-left cursor-pointer hover:bg-amber-100 transition-colors"
                               title={`Mitarbeiter-Wunsch: ${dayWish.note || dayWish.type}`}
                             >
-                              <div className="flex items-center space-x-1 text-[9px] font-bold text-amber-800">
+                              <div className="flex items-center space-x-1 text-xs font-bold text-amber-800">
                                 <Lightbulb className="w-3 h-3 text-amber-600 shrink-0" />
                                 <span>
                                   {dayWish.type === 'WUNSCH_FRUEH' ? 'Wunsch: Frühdienst' : dayWish.type === 'WUNSCH_SPAET' ? 'Wunsch: Spätdienst' : 'Wunsch: Frei'}
                                 </span>
                               </div>
                               {dayWish.note && (
-                                <div className="text-[8px] text-amber-700 truncate mt-0.5">
+                                <div className="text-xs text-amber-700 truncate mt-0.5">
                                   {dayWish.note}
                                 </div>
                               )}
                             </div>
                           )}
 
-                          {dayShifts.length === 0 ? (
+                          {dayShifts.length === 0 && isPastDay ? (
+                            <div className="h-14" />
+                          ) : dayShifts.length === 0 ? (
                             <button
                               onClick={() => handleOpenNewShift(person.id, dayStr)}
                               className={`w-full h-14 rounded-xl border border-dashed flex flex-col items-center justify-center transition-all text-xs group ${
@@ -761,7 +899,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                               title="Schicht planen oder Person hierhin ziehen"
                             >
                               {isHoveredDrop ? (
-                                <span className="text-[10px] text-emerald-700">Hier ablegen (+{defaultDurationHours}h)</span>
+                                <span className="text-xs text-emerald-700">Hier ablegen (+{defaultDurationHours}h)</span>
                               ) : (
                                 <Plus className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
                               )}
@@ -770,27 +908,31 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                             <div className="space-y-1.5">
                               {dayShifts.map((sh) => {
                                 const isCancelled = sh.status === 'CANCELLED';
+                                const finished = isFinished(sh);
 
                                 return (
                                   <div
                                     key={sh.id}
                                     onClick={() => handleOpenEditShift(sh)}
-                                    className={`rounded-xl p-2 text-left relative group shadow-2xs border transition-all cursor-pointer hover:shadow-md hover:border-emerald-400 ${
-                                      isCancelled
+                                    className={`rounded-xl p-2 text-left relative group border transition-all cursor-pointer hover:shadow-md hover:border-emerald-400 ${
+                                      finished
+                                        ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-default'
+                                        : isCancelled
                                         ? 'bg-rose-50 border-rose-300 line-through opacity-75'
                                         : sh.warning
                                           ? 'bg-amber-50/90 border-amber-300 text-slate-900'
                                           : 'bg-emerald-50/80 border-emerald-200 text-slate-800'
                                     }`}
-                                    title="Klicken, um Schichtzeit anzupassen"
+                                    title={finished ? 'Abgeschlossen' : 'Klicken, um Schichtzeit anzupassen'}
                                   >
                                     <div className="flex items-center justify-between">
-                                      <span className="text-[11px] font-bold text-slate-900 flex items-center space-x-1">
+                                      <span className="text-xs font-bold text-slate-900 flex items-center space-x-1">
                                         <Clock className="w-3 h-3 text-slate-500 shrink-0" />
                                         <span>{sh.start_time} - {sh.end_time}</span>
                                       </span>
                                       <div className="flex items-center space-x-1">
-                                        <button
+                                        {!finished && (<>
+<button
                                           onClick={(e) => {
                                             e.stopPropagation();
                                             handleOpenEditShift(sh);
@@ -810,25 +952,26 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                                         >
                                           <Trash2 className="w-3 h-3 text-slate-400 hover:text-rose-600" />
                                         </button>
+</>)}
                                       </div>
                                     </div>
 
                                     <div className="flex items-center space-x-1 mt-0.5">
-                                      <span className="text-[10px] text-slate-600 truncate font-semibold">
+                                      <span className="text-xs text-slate-600 truncate font-semibold">
                                         {sh.group_name.split(' ')[0]}
                                       </span>
                                       {sh.group_name.includes('U3') && (
-                                        <span className="text-[8px] bg-purple-100 text-purple-700 px-1 rounded font-bold">
+                                        <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded font-bold">
                                           U3
                                         </span>
                                       )}
-                                      <span className="text-[9px] text-slate-400">
+                                      <span className="text-xs text-slate-400">
                                         ({calculateNetHours(sh.start_time, sh.end_time, sh.break_minutes)}h)
                                       </span>
                                     </div>
 
                                     {sh.role_override && (
-                                      <span className="text-[9px] bg-indigo-100 text-indigo-700 font-bold px-1 rounded block mt-0.5 no-underline">
+                                      <span className="text-xs bg-indigo-100 text-indigo-700 font-bold px-1 rounded block mt-0.5 no-underline">
                                         {sh.role_override}
                                       </span>
                                     )}
@@ -836,11 +979,11 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                                     {/* Legal ArbZG Warning Indicator on Shift */}
                                     {sh.warning && (
                                       <div 
-                                        className="mt-1 flex items-start space-x-1 p-1 bg-amber-100/90 text-amber-900 border border-amber-300 rounded text-[9px] font-semibold leading-tight"
+                                        className="mt-1 flex items-start space-x-1 p-1 bg-amber-100/90 text-amber-900 border border-amber-300 rounded text-xs font-semibold leading-tight"
                                         title={sh.warning}
                                         onClick={(e) => {
                                           e.stopPropagation();
-                                          alert(sh.warning);
+                                          notifyError(sh.warning ?? "");
                                         }}
                                       >
                                         <AlertTriangle className="w-3 h-3 text-amber-700 shrink-0 mt-0.2" />
@@ -849,7 +992,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                                     )}
 
                                     {isCancelled && (
-                                      <span className="text-[9px] text-rose-700 font-bold block no-underline mt-0.5">
+                                      <span className="text-xs text-rose-700 font-bold block no-underline mt-0.5">
                                         Ausfall (Krank)
                                       </span>
                                     )}
@@ -866,11 +1009,12 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               })}
             </tbody>
           </table>
+          )}
         </div>
 
         {/* Right Column: DRAG & DROP MITARBEITER-POOL SIDEBAR */}
-        {sidebarOpen && (
-          <div className="w-full lg:w-80 shrink-0 bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col space-y-3.5 shadow-2xs">
+        {sidebarOpen && calendarView === 'PERSON' && (
+          <div className="w-full lg:w-80 shrink-0 bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col space-y-3.5">
             <div className="flex items-center justify-between pb-2 border-b border-slate-200">
               <div className="flex items-center space-x-2">
                 <div className="p-1.5 bg-emerald-100 text-emerald-800 rounded-lg">
@@ -878,7 +1022,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                 </div>
                 <div>
                   <h3 className="text-xs font-bold text-slate-900">Mitarbeiter-Pool</h3>
-                  <span className="text-[10px] text-slate-500">Per Drag & Drop reinziehen</span>
+                  <span className="text-xs text-slate-500">Per Drag & Drop reinziehen</span>
                 </div>
               </div>
               <button
@@ -891,12 +1035,12 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
             </div>
 
             {/* Quick explanation hint */}
-            <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 space-y-1">
+            <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1">
               <div className="font-bold flex items-center space-x-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                <span>1-Klick Drag & Drop</span>
+                <span>Drag & Drop</span>
               </div>
-              <p className="text-[10px] text-emerald-800 leading-tight">
+              <p className="text-xs text-emerald-800 leading-tight">
                 Ziehe eine Person auf einen Wochentag. Schicht wird automatisch mit <strong>{defaultDurationHours} Std.</strong> ({defaultStartTime} - {calculateEndTime(defaultStartTime, defaultDurationHours, defaultBreakMinutes)} Uhr) angelegt.
               </p>
             </div>
@@ -933,7 +1077,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     draggable={true}
                     onDragStart={(e) => handleDragStart(e, person)}
                     onDragEnd={handleDragEnd}
-                    className={`bg-white border rounded-xl p-2.5 flex items-center justify-between cursor-grab active:cursor-grabbing hover:border-emerald-400 hover:shadow-xs transition-all select-none ${
+                    className={`bg-white border rounded-xl p-2.5 flex items-center justify-between cursor-grab active:cursor-grabbing hover:border-emerald-400 transition-all select-none ${
                       isDragging ? 'opacity-40 border-dashed border-emerald-500 scale-95' : 'border-slate-200'
                     }`}
                     title={`Ziehe ${person.name} in den Kalender`}
@@ -949,7 +1093,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                         <div className="text-xs font-bold text-slate-900 truncate">
                           {person.name}
                         </div>
-                        <div className="flex items-center space-x-1 text-[10px] text-slate-500">
+                        <div className="flex items-center space-x-1 text-xs text-slate-500">
                           <span>{person.role === 'LEITUNG' ? 'Leitung' : isFachkraft ? 'Fachkraft' : 'Ergänzung'}</span>
                           <span>•</span>
                           <span>{person.weekly_hours}h</span>
@@ -957,13 +1101,13 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                         {/* Skills */}
                         <div className="flex flex-wrap gap-1 mt-0.5">
                           {person.skills?.includes('U3_QUALIFIKATION') && (
-                            <span className="text-[8px] bg-purple-100 text-purple-700 px-1 rounded font-bold">U3</span>
+                            <span className="text-xs bg-purple-100 text-purple-700 px-1 rounded font-bold">U3</span>
                           )}
                           {person.skills?.includes('ERSTE_HILFE_KIND') && (
-                            <span className="text-[8px] bg-rose-100 text-rose-700 px-1 rounded font-bold">EH</span>
+                            <span className="text-xs bg-rose-100 text-rose-700 px-1 rounded font-bold">EH</span>
                           )}
                           {person.role === 'SPRINGER' && (
-                            <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 rounded font-bold">Springer</span>
+                            <span className="text-xs bg-emerald-100 text-emerald-700 px-1 rounded font-bold">Springer</span>
                           )}
                         </div>
                       </div>
@@ -988,8 +1132,8 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
       {/* MODAL: EINSTELLUNGEN FÜR STANDARDSCHICHT (Standardarbeitszeit & ArbZG) */}
       {settingsModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 my-6 animate-scale-up">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200 my-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div className="flex items-center space-x-2">
                 <Sliders className="w-5 h-5 text-emerald-600" />
@@ -1004,9 +1148,9 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
                   <span>Standard-Schichtdauer (Stunden)</span>
-                  <span className="text-emerald-700 font-extrabold">{defaultDurationHours} Std.</span>
+                  <span className="text-emerald-700 font-semibold">{defaultDurationHours} Std.</span>
                 </label>
-                <p className="text-[11px] text-slate-500 mb-2">
+                <p className="text-xs text-slate-500 mb-2">
                   Dauer einer per Drag & Drop in den Kalender gezogenen Schicht (z.B. standardmäßig 8 Stunden).
                 </p>
                 <div className="flex items-center space-x-2">
@@ -1017,7 +1161,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                       onClick={() => setDefaultDurationHours(preset)}
                       className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all border ${
                         defaultDurationHours === preset
-                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          ? 'bg-emerald-600 text-white border-emerald-600'
                           : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
@@ -1076,7 +1220,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                   <ShieldCheck className="w-4 h-4 text-blue-600" />
                   <span>Automatische Prüfung des rechtlichen Rahmens</span>
                 </div>
-                <p className="text-[11px] text-blue-800 leading-relaxed">
+                <p className="text-xs text-blue-800 leading-relaxed">
                   Das System prüft ArbZG § 3 (max. 10h Arbeitszeit), ArbZG § 5 (mind. 11h Ruhezeit zum Vor-/Folgetag) und bestehende Abwesenheiten. Eventuelle Fehler/Warnungen werden prominent gemeldet, verhindern das Eintragen jedoch nicht.
                 </p>
               </div>
@@ -1092,7 +1236,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                 <button
                   type="submit"
                   disabled={savingSettings}
-                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs"
+                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
                 >
                   {savingSettings ? 'Speichere...' : 'Einstellungen speichern'}
                 </button>
@@ -1104,8 +1248,8 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
       {/* MODAL: SCHICHTZEIT ANPASSEN (Zeit im Kalender direkt anpassen) */}
       {editModalOpen && editingShift && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 my-6 animate-scale-up">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 my-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div className="flex items-center space-x-2.5">
                 <div
@@ -1148,7 +1292,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     className="p-2 border border-slate-200 hover:border-emerald-500 rounded-xl text-left bg-slate-50 hover:bg-emerald-50/50 transition-all text-xs"
                   >
                     <div className="font-bold text-slate-800">Frühdienst</div>
-                    <div className="text-[10px] text-slate-500">07:00 - 15:30</div>
+                    <div className="text-xs text-slate-500">07:00 - 15:30</div>
                   </button>
                   <button
                     type="button"
@@ -1156,7 +1300,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     className="p-2 border border-slate-200 hover:border-emerald-500 rounded-xl text-left bg-slate-50 hover:bg-emerald-50/50 transition-all text-xs"
                   >
                     <div className="font-bold text-slate-800">Regeldienst</div>
-                    <div className="text-[10px] text-slate-500">08:00 - 16:30</div>
+                    <div className="text-xs text-slate-500">08:00 - 16:30</div>
                   </button>
                   <button
                     type="button"
@@ -1164,7 +1308,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     className="p-2 border border-slate-200 hover:border-emerald-500 rounded-xl text-left bg-slate-50 hover:bg-emerald-50/50 transition-all text-xs"
                   >
                     <div className="font-bold text-slate-800">Spätdienst</div>
-                    <div className="text-[10px] text-slate-500">08:30 - 17:00</div>
+                    <div className="text-xs text-slate-500">08:30 - 17:00</div>
                   </button>
                 </div>
               </div>
@@ -1185,14 +1329,14 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustEditTime('start', -30)}
-                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                      className="flex-1 text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
                     >
                       -30m
                     </button>
                     <button
                       type="button"
                       onClick={() => adjustEditTime('start', 30)}
-                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                      className="flex-1 text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
                     >
                       +30m
                     </button>
@@ -1213,14 +1357,14 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     <button
                       type="button"
                       onClick={() => adjustEditTime('end', -30)}
-                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                      className="flex-1 text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
                     >
                       -30m
                     </button>
                     <button
                       type="button"
                       onClick={() => adjustEditTime('end', 30)}
-                      className="flex-1 text-[10px] bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
+                      className="flex-1 text-xs bg-slate-100 hover:bg-slate-200 py-1 rounded font-semibold text-slate-700"
                     >
                       +30m
                     </button>
@@ -1264,7 +1408,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs flex items-center justify-between">
                 <div>
                   <span className="text-slate-500">Nettoarbeitszeit: </span>
-                  <span className="font-extrabold text-slate-900 text-sm">
+                  <span className="font-semibold text-slate-900 text-sm">
                     {calculateNetHours(editFormData.start_time, editFormData.end_time, editFormData.break_minutes)} Std.
                   </span>
                 </div>
@@ -1313,7 +1457,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs"
+                    className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
                   >
                     Zeit anpassen & Speichern
                   </button>
@@ -1326,7 +1470,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
       {/* MODAL: SCHICHT MANUELL EINTRAGEN */}
       {modalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 my-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="text-base font-bold text-slate-900">Schicht eintragen</h3>
@@ -1345,7 +1489,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     <span>
                       {activeEmployeeWish.type === 'WUNSCH_FRUEH' ? 'Frühdienst' : activeEmployeeWish.type === 'WUNSCH_SPAET' ? 'Spätdienst' : 'Frei'}
                     </span>
-                    {activeEmployeeWish.note && <p className="text-[11px] text-amber-800 italic">"{activeEmployeeWish.note}"</p>}
+                    {activeEmployeeWish.note && <p className="text-xs text-amber-800 italic">"{activeEmployeeWish.note}"</p>}
                   </div>
                 </div>
               </div>
@@ -1355,7 +1499,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
             <div className="mb-4">
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center space-x-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>1-Klick Schichtvorlage auswählen</span>
+                <span>Schichtvorlage auswählen</span>
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {templates.map((tpl) => (
@@ -1371,10 +1515,10 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                     })}
                     className="p-2 rounded-xl text-left border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/60 transition-all text-xs group"
                   >
-                    <div className="font-bold text-slate-800 text-[11px] group-hover:text-emerald-700">
+                    <div className="font-bold text-slate-800 text-xs group-hover:text-emerald-700">
                       {tpl.name}
                     </div>
-                    <div className="text-[10px] text-slate-400">
+                    <div className="text-xs text-slate-400">
                       {tpl.start_time} - {tpl.end_time} ({tpl.break_minutes}m P.)
                     </div>
                   </button>
@@ -1469,7 +1613,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               </div>
 
               {/* ArbZG Hint */}
-              <div className="bg-blue-50 text-blue-800 p-2.5 rounded-xl text-[11px] flex items-center space-x-1.5">
+              <div className="bg-blue-50 text-blue-800 p-2.5 rounded-xl text-xs flex items-center space-x-1.5">
                 <Clock className="w-4 h-4 shrink-0 text-blue-600" />
                 <span>Gesetzlicher Rahmen (ArbZG § 3, § 4, § 5) wird beim Speichern automatisch geprüft.</span>
               </div>
@@ -1484,7 +1628,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs"
+                  className="px-4 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"
                 >
                   Schicht speichern
                 </button>
@@ -1496,7 +1640,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
 
       {/* PRINT & PDF AUSHANG MODAL */}
       {printOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl border border-slate-200 my-6">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center space-x-2.5">
@@ -1515,7 +1659,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => window.print()}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center space-x-1.5"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-1.5"
                 >
                   <Printer className="w-4 h-4" />
                   <span>Jetzt Drucken / PDF speichern</span>
@@ -1534,18 +1678,18 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               <div className="border-b-2 border-slate-800 pb-3 mb-4">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h1 className="text-xl font-black uppercase tracking-tight text-slate-900">
-                      Städtische Kindertagesstätte Sonnenschein
+                    <h1 className="text-xl font-semibold uppercase tracking-tight text-slate-900">
+                      Meine Kita
                     </h1>
                     <p className="text-xs text-slate-600 font-semibold mt-0.5">
                       Offizieller Dienstplan Kalenderwoche {weekNumber} ({format(weekDays[0], 'dd. MMMM', { locale: de })} – {format(weekDays[4], 'dd. MMMM yyyy', { locale: de })})
                     </p>
                   </div>
                   <div className="text-right">
-                    <span className="inline-block px-2.5 py-1 bg-emerald-100 text-emerald-900 text-[10px] font-bold rounded-md border border-emerald-300">
+                    <span className="inline-block px-2.5 py-1 bg-emerald-100 text-emerald-900 text-xs font-bold rounded-md border border-emerald-300">
                       ✓ Verbindlich freigegeben durch Einrichtungsleitung
                     </span>
-                    <div className="text-[10px] text-slate-400 mt-1">
+                    <div className="text-xs text-slate-400 mt-1">
                       Stand: {new Date().toLocaleDateString('de-DE')}
                     </div>
                   </div>
@@ -1555,13 +1699,13 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               {/* Roster Table */}
               <table className="w-full text-xs border border-slate-300 border-collapse mb-4 bg-white">
                 <thead>
-                  <tr className="bg-slate-200 text-slate-800 text-[11px] font-bold">
+                  <tr className="bg-slate-200 text-slate-800 text-xs font-bold">
                     <th className="border border-slate-300 p-2 text-left">Mitarbeiter:in</th>
                     <th className="border border-slate-300 p-2 text-left">Rolle / Skills</th>
                     {weekDays.map((d, i) => (
                       <th key={i} className="border border-slate-300 p-2 text-center">
                         {format(d, 'EEEE', { locale: de })}<br />
-                        <span className="font-normal text-[10px] text-slate-500">{format(d, 'dd.MM.')}</span>
+                        <span className="font-normal text-xs text-slate-500">{format(d, 'dd.MM.')}</span>
                       </th>
                     ))}
                   </tr>
@@ -1572,23 +1716,23 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                       <tr key={person.id} className="border-b border-slate-200 hover:bg-slate-50">
                         <td className="border border-slate-300 p-2 font-bold text-slate-900">
                           {person.name}
-                          <span className="block font-normal text-[10px] text-slate-500">{person.weekly_hours}h / Woche</span>
+                          <span className="block font-normal text-xs text-slate-500">{person.weekly_hours}h / Woche</span>
                         </td>
-                        <td className="border border-slate-300 p-2 text-[10px] text-slate-600">
+                        <td className="border border-slate-300 p-2 text-xs text-slate-600">
                           <div>{person.role}</div>
-                          <div className="text-[9px] text-slate-400">{person.skills?.join(', ')}</div>
+                          <div className="text-xs text-slate-400">{person.skills?.join(', ')}</div>
                         </td>
                         {weekDays.map((day, dIdx) => {
                           const dayStr = format(day, 'yyyy-MM-dd');
                           const dayShifts = shifts.filter(s => s.staff_id === person.id && s.date === dayStr && s.status === 'CONFIRMED');
 
                           return (
-                            <td key={dIdx} className="border border-slate-300 p-2 text-center text-[10px]">
+                            <td key={dIdx} className="border border-slate-300 p-2 text-center text-xs">
                               {dayShifts.length > 0 ? (
                                 dayShifts.map(sh => (
                                   <div key={sh.id}>
                                     <div className="font-bold text-slate-800">{sh.start_time} - {sh.end_time}</div>
-                                    <div className="text-[9px] text-slate-500 font-medium">{sh.group_name.split(' ')[0]}</div>
+                                    <div className="text-xs text-slate-500 font-medium">{sh.group_name.split(' ')[0]}</div>
                                   </div>
                                 ))
                               ) : (
@@ -1604,7 +1748,7 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
               </table>
 
               {/* Compliance & Signatures */}
-              <div className="grid grid-cols-2 gap-6 pt-3 border-t border-slate-300 text-[10px] text-slate-600">
+              <div className="grid grid-cols-2 gap-6 pt-3 border-t border-slate-300 text-xs text-slate-600">
                 <div className="space-y-1">
                   <div className="font-bold text-slate-800">Gesetzlicher Prüfvermerk (KiBiz / KiTaG / ArbZG):</div>
                   <p>
@@ -1613,10 +1757,10 @@ export const ShiftPlanner: React.FC<ShiftPlannerProps> = ({
                   </p>
                 </div>
                 <div className="flex justify-between items-end pt-4">
-                  <div className="text-center w-36 border-t border-slate-400 pt-1 text-[10px]">
-                    Sabine Weber<br /><span className="text-slate-400">Einrichtungsleitung</span>
+                  <div className="text-center w-36 border-t border-slate-400 pt-1 text-xs">
+                    <span className="text-slate-400">Einrichtungsleitung</span>
                   </div>
-                  <div className="text-center w-36 border-t border-slate-400 pt-1 text-[10px]">
+                  <div className="text-center w-36 border-t border-slate-400 pt-1 text-xs">
                     Personalrat / Sicherheitsbeauftragte
                   </div>
                 </div>

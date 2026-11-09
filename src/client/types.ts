@@ -22,6 +22,7 @@ export interface Staff {
   certifications?: Certification[];
   standard_work_hours?: string;
   availability_window?: string;
+  availability_rules?: AvailabilityRule[];
   clock_status?: 'CLOCKED_IN' | 'IN_BREAK' | 'COMPLETED' | null;
   current_absence?: 'SICK' | 'VACATION' | 'TRAINING' | null;
   unread_notifications_count?: number;
@@ -29,6 +30,12 @@ export interface Staff {
   password?: string;
   password_changed?: number;
   critical_alerts_mode?: 'CRITICAL' | 'SIMPLE';
+}
+
+export interface AvailabilityRule {
+  type: 'ONLY_DAYS' | 'MAX_DAYS_WEEK' | 'MAX_HOURS_DAY' | 'EARLIEST' | 'LATEST' | 'NOT_BEFORE_VACATION' | 'WEEK_RHYTHM' | 'NOTE';
+  days?: number[];
+  value?: string | number;
 }
 
 export interface Group {
@@ -77,29 +84,18 @@ export interface RatioStatusGroup {
   group_name: string;
   group_type: string;
   child_count: number;
-  enrolled_children?: number;
-  effective_children?: number;
-  absent_children?: number;
+  effective_children: number;
+  worst_time: string;
+  slots: { minute: number; children: number; staff: number; fachkraefte: number }[];
   target_ratio: number;
   actual_ratio: number;
-  static_ratio?: number;
   min_fachkraft_percent: number;
   actual_fachkraft_percent: number;
   total_staff: number;
   fachkraefte: number;
   ergaenzungskraefte: number;
-  status: 'OPTIMAL' | 'WARNING' | 'CRITICAL' | 'BALANCED_OK';
+  status: 'OPTIMAL' | 'WARNING' | 'CRITICAL';
   message: string;
-  auto_balancing?: {
-    active: boolean;
-    absent_children: number;
-    absent_sick_children?: number;
-    enrolled_children: number;
-    effective_children: number;
-    static_ratio: number;
-    dynamic_ratio: number;
-    saved_emergency: boolean;
-  };
   staff: any[];
 }
 
@@ -303,6 +299,14 @@ export interface DirectorNote {
   checklist: DirectorChecklistItem[];
   created_at: string;
   updated_at: string;
+}
+
+export interface Excursion {
+  id: string;
+  date: string;
+  group_id: string;
+  group_name: string;
+  staff_count: number;
 }
 
 export interface KitaClosure {

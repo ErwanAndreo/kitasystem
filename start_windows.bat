@@ -1,4 +1,6 @@
 @echo off
+cd /d "%~dp0"
+set "PATH=%~dp0node;%PATH%"
 echo ========================================================
 echo    KitaPlaner Pro - Startskript (Windows)
 echo ========================================================

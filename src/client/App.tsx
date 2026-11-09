@@ -1,22 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import { Staff, Group, Shift, RatioStatusGroup, Approval, AutopilotProposal, NotificationQueueItem, SystemSettings } from './types';
+import { notifyError } from './notify';
+import React, { useState, useEffect, useRef } from 'react';
+import { Staff, Group, Shift, RatioStatusGroup, Approval, AutopilotProposal, NotificationQueueItem, } from './types';
 import { Header } from './components/Header';
 import { RatioRadar } from './components/RatioRadar';
 import { ApprovalCenter } from './components/ApprovalCenter';
 import { ShiftPlanner } from './components/ShiftPlanner';
 import { GroupManagement } from './components/GroupManagement';
 import { StaffManagement } from './components/StaffManagement';
-import { DirectorNotebook } from './components/DirectorNotebook';
-import { ChecklistManagement } from './components/ChecklistManagement';
-import { ChildrenManagement } from './components/ChildrenManagement';
-import { TabletKioskView } from './components/TabletKioskView';
-import { RatioSettingsView } from './components/RatioSettingsView';
-import { ParentInitiativeManagement } from './components/ParentInitiativeManagement';
-import { ParentPortalView } from './components/ParentPortalView';
-import { FinanceAndWaitlistView } from './components/FinanceAndWaitlistView';
+// import { DirectorNotebook } from './components/DirectorNotebook';
+// import { ChecklistManagement } from './components/ChecklistManagement';
+// import { ChildrenManagement } from './components/ChildrenManagement';
+import { ChildCountPlanner } from './components/ChildCountPlanner';
+import { StandardRoster } from './components/StandardRoster';
+import { AbsenceManagement } from './components/AbsenceManagement';
+import { DaySpecials } from './components/DaySpecials';
+// import { TabletKioskView } from './components/TabletKioskView';
+// import { RatioSettingsView } from './components/RatioSettingsView';
+import { GroupRatios } from './components/GroupRatios';
+// import { ParentInitiativeManagement } from './components/ParentInitiativeManagement';
+// import { ParentPortalView } from './components/ParentPortalView';
+// import { FinanceAndWaitlistView } from './components/FinanceAndWaitlistView';
 import { AutopilotWidget } from './components/AutopilotWidget';
 import { EinspringKaskadeWidget } from './components/EinspringKaskadeWidget';
-import { MobileAppView } from './components/MobileAppView';
+// import { MobileAppView } from './components/MobileAppView';
 import { EmergencyModal } from './components/EmergencyModal';
 import { useLanguage } from './i18n';
 import { format, startOfWeek, addDays } from 'date-fns';
@@ -26,8 +32,6 @@ import {
   CalendarDays, 
   Layers, 
   Users, 
-  ShieldCheck, 
-  Sparkles, 
   BookOpen, 
   CheckSquare, 
   AlertTriangle, 
@@ -36,14 +40,41 @@ import {
   ShieldAlert, 
   Baby, 
   Sliders,
+  Repeat,
+  CalendarOff,
   Building2,
   Landmark
 } from 'lucide-react';
 
+type LeitungTab = 'DASHBOARD' | 'ROSTER' | 'ABSENCES' | 'STANDARD_ROSTER' | 'CHILDREN' | 'GROUPS' | 'STAFF' | 'NOTEBOOK' | 'CHECKLISTS' | 'RATIO_SETTINGS' | 'INITIATIVE' | 'FINANCE_WAITLIST';
+
+const LEITUNG_NAV: { section: string; items: { id: LeitungTab; label: string; icon: React.ElementType }[] }[] = [
+  { section: 'nav.today', items: [
+    { id: 'DASHBOARD', label: 'tabs.dashboard', icon: BarChart3 },
+    { id: 'ROSTER', label: 'tabs.roster', icon: CalendarDays },
+    { id: 'ABSENCES', label: 'nav.absences', icon: CalendarOff }
+  ] },
+  { section: 'nav.people', items: [
+    { id: 'CHILDREN', label: 'nav.children', icon: Baby },
+    { id: 'STAFF', label: 'tabs.staff', icon: Users },
+    { id: 'GROUPS', label: 'tabs.groups', icon: Layers }
+  ] },
+  // { section: 'nav.organisation', items: [
+  //   { id: 'CHECKLISTS', label: 'tabs.checklists', icon: CheckSquare },
+  //   { id: 'NOTEBOOK', label: 'tabs.notebook', icon: BookOpen }
+  // ] },
+  { section: 'nav.admin', items: [
+    // { id: 'FINANCE_WAITLIST', label: 'nav.finance', icon: Landmark },
+    // { id: 'INITIATIVE', label: 'nav.initiative', icon: Building2 },
+    { id: 'STANDARD_ROSTER', label: 'nav.standard', icon: Repeat },
+    { id: 'RATIO_SETTINGS', label: 'nav.ratio', icon: Sliders }
+  ] }
+];
+
 export const App: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [currentView, setCurrentView] = useState<'LEITUNG' | 'MOBILE' | 'TABLET' | 'ELTERN'>('LEITUNG');
-  const [leitungTab, setLeitungTab] = useState<'DASHBOARD' | 'ROSTER' | 'CHILDREN' | 'GROUPS' | 'STAFF' | 'NOTEBOOK' | 'CHECKLISTS' | 'RATIO_SETTINGS' | 'INITIATIVE' | 'FINANCE_WAITLIST'>('DASHBOARD');
+  const [leitungTab, setLeitungTab] = useState<LeitungTab>('DASHBOARD');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
 
   const [staffList, setStaffList] = useState<Staff[]>([]);
@@ -55,17 +86,26 @@ export const App: React.FC = () => {
   const [proposals, setProposals] = useState<AutopilotProposal[]>([]);
   const [queueItems, setQueueItems] = useState<NotificationQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [specialsVersion, setSpecialsVersion] = useState(0);
 
   // Modals & Critical Alerts
   const [emergencyOpen, setEmergencyOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; isError: boolean } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>();
   const [directorCriticalAlerts, setDirectorCriticalAlerts] = useState<any[]>([]);
   const [directorAlertsMode, setDirectorAlertsMode] = useState<'CRITICAL' | 'SIMPLE'>('CRITICAL');
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
+  const showToast = (msg: string, isError = false) => {
+    setToast({ msg, isError });
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), isError ? 8000 : 4000);
   };
+
+  useEffect(() => {
+    const onError = (e: Event) => showToast((e as CustomEvent<string>).detail, true);
+    window.addEventListener('kita-error', onError);
+    return () => window.removeEventListener('kita-error', onError);
+  }, []);
 
   const handleDismissCriticalAlert = async (alertId: string) => {
     try {
@@ -138,11 +178,11 @@ export const App: React.FC = () => {
         body: JSON.stringify({ autopilot_enabled: nextState })
       });
       if (res.ok) {
-        showToast(nextState ? '🤖 Auto-Pilot aktiviert: Schichtpläne werden bei Bedarf automatisch vorbereitet!' : 'Auto-Pilot pausiert.');
+        showToast(nextState ? 'Auto-Pilot aktiviert: Schichtpläne werden bei Bedarf automatisch vorbereitet!' : 'Auto-Pilot pausiert.');
         await loadAllData();
       }
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -155,7 +195,7 @@ export const App: React.FC = () => {
       showToast(json.message);
       await loadAllData();
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -166,7 +206,7 @@ export const App: React.FC = () => {
       showToast('Vorschlag verworfen.');
       await loadAllData();
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -178,7 +218,7 @@ export const App: React.FC = () => {
       showToast(json.message);
       await loadAllData();
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -188,11 +228,11 @@ export const App: React.FC = () => {
       const res = await fetch('/api/autopilot/analyze', { method: 'POST' });
       const json = await res.json();
       showToast(json.proposals_generated > 0 
-        ? `🤖 ${json.proposals_generated} Auto-Pilot Vertretungsvorschläge generiert!` 
+        ? `${json.proposals_generated} Auto-Pilot Vertretungsvorschläge generiert!` 
         : '✓ Dienstplan geprüft: Alle Gruppen sind optimal besetzt.');
       await loadAllData();
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -205,7 +245,7 @@ export const App: React.FC = () => {
         body: JSON.stringify({
           action,
           decision_note: note,
-          decision_by: 'Sabine Weber (Einrichtungsleitung)'
+          decision_by: 'Einrichtungsleitung'
         })
       });
       if (!res.ok) throw new Error('Entscheidung fehlgeschlagen');
@@ -213,7 +253,7 @@ export const App: React.FC = () => {
       showToast(action === 'APPROVED' ? '✓ Antrag durch Leitung verbindlich freigegeben!' : '✗ Antrag abgelehnt.');
       await loadAllData();
     } catch (e: any) {
-      alert(e.message);
+      notifyError(e.message);
     }
   };
 
@@ -250,7 +290,7 @@ export const App: React.FC = () => {
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.error);
-    showToast('🚨 Krankmeldung erfasst. Vertretungsvorschlag liegt im Freigabe-Center!');
+    showToast('Krankmeldung erfasst. Vertretungsvorschlag liegt im Freigabe-Center!');
     await loadAllData();
   };
 
@@ -264,7 +304,7 @@ export const App: React.FC = () => {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error);
     if (json.warning) {
-      showToast(`⚠️ ArbZG-Hinweis erfasst: Schicht wurde autorisiert & eingetragen.`);
+      showToast(`ArbZG-Hinweis erfasst: Schicht wurde autorisiert & eingetragen.`);
     } else {
       showToast('Schicht erfolgreich eingestellt & Mitarbeiterin benachrichtigt!');
     }
@@ -281,7 +321,7 @@ export const App: React.FC = () => {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error);
     if (json.warning) {
-      showToast(`⚠️ ArbZG-Hinweis erfasst: Schichtzeit wurde autorisiert & angepasst.`);
+      showToast(`ArbZG-Hinweis erfasst: Schichtzeit wurde autorisiert & angepasst.`);
     } else {
       showToast('Schichtzeit erfolgreich angepasst!');
     }
@@ -290,8 +330,24 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteShift = async (id: string) => {
-    await fetch(`/api/shifts/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/shifts/${id}`, { method: 'DELETE' });
+    if (!res.ok) {
+      notifyError((await res.json()).error);
+      return;
+    }
     showToast('Schicht gelöscht.');
+    await loadAllData();
+  };
+
+  const handleReplan = async (scope: 'TODAY' | 'WEEK', week_start: string) => {
+    const res = await fetch('/api/roster/replan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, week_start })
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error);
+    showToast(json.message, json.open.length > 0);
     await loadAllData();
   };
 
@@ -325,10 +381,10 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
       {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-xl flex items-center space-x-2 text-xs font-semibold animate-slide-up border border-slate-700">
-          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{toastMessage}</span>
+      {toast && (
+        <div role="status" className={`fixed bottom-5 right-5 z-50 max-w-md text-white px-4 py-3 rounded-2xl shadow-xl flex items-start gap-2 text-sm font-medium ${toast.isError ? 'bg-rose-700' : 'bg-slate-900'}`}>
+          {toast.isError ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /> : <Check className="w-4 h-4 mt-0.5 text-emerald-400 shrink-0" />}
+          <span>{toast.msg}</span>
         </div>
       )}
 
@@ -336,12 +392,10 @@ export const App: React.FC = () => {
       <Header
         currentView={currentView}
         setCurrentView={setCurrentView}
-        pendingApprovalsCount={pendingApprovalsCount}
         onOpenEmergency={() => setEmergencyOpen(true)}
         criticalRatioAlert={criticalRatioAlert}
         autopilotEnabled={autopilotEnabled}
         onToggleAutopilot={handleToggleAutopilot}
-        queuedNotificationsCount={queueItems.length}
       />
 
       {/* Main Content Area */}
@@ -354,7 +408,36 @@ export const App: React.FC = () => {
           <>
             {/* VIEW 1: PERSPEKTIVE DER EINRICHTUNGSLEITUNG (Windows / macOS / Web App) */}
             {currentView === 'LEITUNG' && (
-              <div>
+              <div className="lg:flex lg:items-start lg:gap-6">
+                <nav aria-label="Leitung" className="mb-4 lg:mb-0 lg:w-56 lg:shrink-0 lg:sticky lg:top-20 flex lg:block gap-1 overflow-x-auto pb-1 lg:pb-0">
+                  {LEITUNG_NAV.map((group) => (
+                    <div key={group.section} className="flex lg:block gap-1 shrink-0 lg:mb-5">
+                      <div className="hidden lg:block px-3 mb-1 text-xs font-semibold text-slate-500">{t(group.section)}</div>
+                      {group.items.map(({ id, label, icon: Icon }) => {
+                        const active = leitungTab === id;
+                        const badge = id === 'DASHBOARD' ? pendingApprovalsCount : id === 'STAFF' ? criticalCertsCount : 0;
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => setLeitungTab(id)}
+                            aria-current={active ? 'page' : undefined}
+                            className={`flex lg:w-full items-center gap-2.5 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
+                              active ? 'bg-emerald-100 text-emerald-900 font-semibold' : 'text-slate-700 hover:bg-slate-200/70'
+                            }`}
+                          >
+                            <Icon className="w-4 h-4 shrink-0" />
+                            <span>{t(label)}</span>
+                            {badge > 0 && (
+                              <span className="ml-auto px-1.5 rounded-full bg-amber-200 text-amber-900 text-xs font-semibold tabular-nums">{badge}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ))}
+                </nav>
+
+                <div className="flex-1 min-w-0">
                 {/* Kritische Warnungen & Krankmeldungen für die Leitung (je nach Einstellung kritisch oder einfach) */}
                 {directorCriticalAlerts.length > 0 && (
                   <div className="mb-6 space-y-3">
@@ -363,7 +446,7 @@ export const App: React.FC = () => {
                       return isCritical ? (
                         <div
                           key={alert.id}
-                          className="p-4 bg-rose-50 border-2 border-rose-500 rounded-2xl shadow-sm animate-pulse flex items-start justify-between"
+                          className="p-4 bg-rose-50 border-2 border-rose-500 rounded-2xl shadow-sm flex items-start justify-between"
                         >
                           <div className="flex items-start space-x-3">
                             <div className="p-2 bg-rose-600 text-white rounded-xl shrink-0 mt-0.5">
@@ -371,11 +454,8 @@ export const App: React.FC = () => {
                             </div>
                             <div>
                               <div className="flex items-center space-x-2">
-                                <span className="text-xs font-black text-rose-950 uppercase tracking-wider">
+                                <span className="text-sm font-semibold text-rose-950">
                                   {alert.title}
-                                </span>
-                                <span className="text-[10px] bg-rose-200 text-rose-900 font-bold px-2 py-0.5 rounded-full">
-                                  🚨 NOTFALL-ALARM
                                 </span>
                               </div>
                               <p className="text-xs text-rose-900 font-medium mt-1 leading-relaxed">
@@ -387,7 +467,7 @@ export const App: React.FC = () => {
                                     setLeitungTab('DASHBOARD');
                                     setEmergencyOpen(true);
                                   }}
-                                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors flex items-center space-x-1.5"
+                                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5"
                                 >
                                   <ShieldAlert className="w-3.5 h-3.5" />
                                   <span>Notfall-Vertretung planen</span>
@@ -412,7 +492,7 @@ export const App: React.FC = () => {
                       ) : (
                         <div
                           key={alert.id}
-                          className="p-3 bg-slate-50 border border-slate-300 rounded-2xl flex items-center justify-between text-xs text-slate-700 shadow-2xs"
+                          className="p-3 bg-slate-50 border border-slate-300 rounded-2xl flex items-center justify-between text-xs text-slate-700"
                         >
                           <div className="flex items-center space-x-2.5 min-w-0">
                             <Info className="w-4 h-4 text-slate-500 shrink-0" />
@@ -433,145 +513,13 @@ export const App: React.FC = () => {
                   </div>
                 )}
 
-                {/* Leitung Navigation Tabs */}
-                <div className="flex items-center space-x-2 mb-6 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-xs max-w-fit">
-                  <button
-                    onClick={() => setLeitungTab('DASHBOARD')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'DASHBOARD'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <BarChart3 className="w-4 h-4" />
-                    <span>{t('tabs.dashboard')}</span>
-                    {pendingApprovalsCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-amber-400 text-slate-900 font-black">
-                        {pendingApprovalsCount}
-                      </span>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('ROSTER')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'ROSTER'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <CalendarDays className="w-4 h-4" />
-                    <span>{t('tabs.roster')}</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('CHILDREN')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'CHILDREN'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Baby className="w-4 h-4" />
-                    <span>Kinder & Familien</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('GROUPS')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'GROUPS'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Layers className="w-4 h-4" />
-                    <span>{t('tabs.groups')}</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('STAFF')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'STAFF'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <Users className="w-4 h-4" />
-                    <span>{t('tabs.staff')}</span>
-                    {criticalCertsCount > 0 && (
-                      <span className="ml-1 px-1.5 py-0.2 text-[10px] rounded-full bg-rose-500 text-white font-black" title={`${criticalCertsCount} Zertifikate fällig oder abgelaufen`}>
-                        {criticalCertsCount}
-                      </span>
-                    )}
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('NOTEBOOK')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'NOTEBOOK'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <BookOpen className="w-4 h-4" />
-                    <span>{t('tabs.notebook')}</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('CHECKLISTS')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'CHECKLISTS'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                  >
-                    <CheckSquare className="w-4 h-4" />
-                    <span>{t('tabs.checklists')}</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('RATIO_SETTINGS')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'RATIO_SETTINGS'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                    title="Ebene 3: Gesetzliche Betreuungsschlüssel & Jahres-Setup"
-                  >
-                    <Sliders className="w-4 h-4" />
-                    <span>Schlüssel-Setup</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('INITIATIVE')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'INITIATIVE'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                    title="Trägerverein & Elterninitiative (LAGE.app Parität: Elterndienste, Vorstandswechsel, Umfragen, Verträge)"
-                  >
-                    <Building2 className="w-4 h-4" />
-                    <span>Träger & Initiative</span>
-                  </button>
-
-                  <button
-                    onClick={() => setLeitungTab('FINANCE_WAITLIST')}
-                    className={`flex items-center space-x-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
-                      leitungTab === 'FINANCE_WAITLIST'
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                    }`}
-                    title="Modul E: Warteliste, SEPA-Abrechnung & Behördenstatistiken"
-                  >
-                    <Landmark className="w-4 h-4" />
-                    <span>Finanzen & Warteliste</span>
-                  </button>
-                </div>
-
                 {/* Sub-view 1: DASHBOARD & LIVE-RADAR */}
                 {leitungTab === 'DASHBOARD' && (
                   <>
+                    <RatioRadar
+                      groupsStatus={ratioStatus}
+                      date={currentDate.toLocaleDateString(language, { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
+                    />
                     <AutopilotWidget
                       proposals={proposals}
                       queueItems={queueItems}
@@ -585,10 +533,6 @@ export const App: React.FC = () => {
                       staffList={staffList}
                       onRefreshData={loadAllData}
                     />
-                    <RatioRadar
-                      groupsStatus={ratioStatus}
-                      date={format(currentDate, 'EEEE, dd.MM.yyyy')}
-                    />
                     <ApprovalCenter
                       approvals={approvals}
                       onDecide={handleDecideApproval}
@@ -599,6 +543,7 @@ export const App: React.FC = () => {
 
                 {/* Sub-view 2: SCHICHTPLANUNG */}
                 {leitungTab === 'ROSTER' && (
+                  <>
                   <ShiftPlanner
                     shifts={shifts}
                     staff={staffList}
@@ -608,15 +553,31 @@ export const App: React.FC = () => {
                     onAddShift={handleAddShift}
                     onUpdateShift={handleUpdateShift}
                     onDeleteShift={handleDeleteShift}
+                    onReplan={handleReplan}
+                    specialsVersion={specialsVersion}
                   />
+                    <DaySpecials
+                      groups={groups}
+                      showToast={showToast}
+                      onChanged={() => {
+                        setSpecialsVersion(v => v + 1);
+                        loadAllData();
+                      }}
+                    />
+                  </>
                 )}
 
-                {/* Sub-view 2b: KINDER- & STAMMDATENVERWALTUNG */}
+                {leitungTab === 'ABSENCES' && (
+                  <AbsenceManagement staff={staffList} onChanged={loadAllData} />
+                )}
+
+                {leitungTab === 'STANDARD_ROSTER' && (
+                  <StandardRoster staff={staffList} groups={groups} onChanged={loadAllData} />
+                )}
+
+                {/* Sub-view 2b: KINDERZAHLEN */}
                 {leitungTab === 'CHILDREN' && (
-                  <ChildrenManagement
-                    groups={groups}
-                    showToast={showToast}
-                  />
+                  <ChildCountPlanner groups={groups} onChanged={loadAllData} />
                 )}
 
                 {/* Sub-view 3: GRUPPEN & SCHLÜSSEL-RICHTLINIEN */}
@@ -639,34 +600,35 @@ export const App: React.FC = () => {
                 )}
 
                 {/* Sub-view 5: LEITUNGS-NOTIZBUCH (ONENOTE STYLE) */}
-                {leitungTab === 'NOTEBOOK' && (
+                {/* {leitungTab === 'NOTEBOOK' && (
                   <DirectorNotebook />
-                )}
+                )} */}
 
                 {/* Sub-view 6: CHECKLISTEN & STANDARDS */}
-                {leitungTab === 'CHECKLISTS' && (
+                {/* {leitungTab === 'CHECKLISTS' && (
                   <ChecklistManagement staffList={staffList} />
-                )}
+                )} */}
 
                 {/* Sub-view 7: BETREUUNGSSCHLÜSSEL-JAHRES-SETUP (EBENE 3) */}
                 {leitungTab === 'RATIO_SETTINGS' && (
-                  <RatioSettingsView showToast={showToast} />
+                  <GroupRatios groups={groups} onChanged={loadAllData} />
                 )}
 
-                {/* Sub-view 8: TRÄGERVEREIN & ELTERNINITIATIVE (LAGE.app Parität) */}
-                {leitungTab === 'INITIATIVE' && (
+                {/* Sub-view 8: TRÄGERVEREIN & ELTERNINITIATIVE */}
+                {/* {leitungTab === 'INITIATIVE' && (
                   <ParentInitiativeManagement showToast={showToast} />
-                )}
+                )} */}
 
                 {/* Sub-view 9: VERWALTUNG, FINANZEN & WARTELISTE (MODUL E) */}
-                {leitungTab === 'FINANCE_WAITLIST' && (
+                {/* {leitungTab === 'FINANCE_WAITLIST' && (
                   <FinanceAndWaitlistView showToast={showToast} />
-                )}
+                )} */}
+                </div>
               </div>
             )}
 
             {/* VIEW 2: MITARBEITER-APP */}
-            {currentView === 'MOBILE' && (
+            {/* {currentView === 'MOBILE' && (
               <MobileAppView
                 staffList={staffList}
                 shifts={shifts}
@@ -674,20 +636,20 @@ export const App: React.FC = () => {
                 onRequestSwap={handleRequestSwap}
                 onRequestVacation={handleRequestVacation}
               />
-            )}
+            )} */}
 
             {/* VIEW 3: GRUPPEN-TABLET KIOSK (iPad / Android Tablet) */}
-            {currentView === 'TABLET' && (
+            {/* {currentView === 'TABLET' && (
               <TabletKioskView
                 groups={groups}
                 showToast={showToast}
               />
-            )}
+            )} */}
 
             {/* VIEW 4: ELTERN-PORTAL & ELTERN-APP (Web + Mobile) */}
-            {currentView === 'ELTERN' && (
+            {/* {currentView === 'ELTERN' && (
               <ParentPortalView showToast={showToast} />
-            )}
+            )} */}
           </>
         )}
       </main>

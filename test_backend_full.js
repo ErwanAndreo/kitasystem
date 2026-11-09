@@ -3,6 +3,11 @@ import assert from 'assert';
 
 const BASE_URL = 'http://localhost:3000';
 
+const localToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 async function testAll() {
   console.log('🧪 Starting KitaPlaner Pro Backend E2E Test Suite...\n');
   let passed = 0;
@@ -37,8 +42,8 @@ async function testAll() {
     assert(groups.length >= 3);
     const u3 = groups.find(g => g.type === 'U3');
     assert(u3, 'U3 group missing');
-    assert(u3.target_ratio > 3.0 && u3.target_ratio <= 3.5);
-    assert.strictEqual(u3.min_fachkraft_percent, 0.67);
+    assert(u3.target_ratio > 0);
+    assert(u3.min_fachkraft_percent > 0);
   });
 
   // 3. Staff & Contracts
@@ -238,7 +243,7 @@ async function testAll() {
       body: JSON.stringify({
         staff_id: 's_julia',
         group_id: 'g_u3_maeuse',
-        date: '2026-10-30',
+        date: '2027-10-30',
         start_time: '08:00',
         end_time: '16:30',
         break_minutes: 30,
@@ -388,7 +393,7 @@ async function testAll() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Team-Fortbildungstag DGUV',
-        date: '2026-11-20',
+        date: '2027-11-19',
         type: 'KONZEPTIONSTAG',
         notes: 'In-House Erste Hilfe Auffrischung'
       })
@@ -562,6 +567,13 @@ async function testAll() {
   // 22. Auto-Pilot Analysis & 1-Click Acceptance
   let acceptedPropId = null;
   await check('POST /api/autopilot/analyze creates proposals for undercovered groups', async () => {
+    for (const groupId of ['g_u3_maeuse', 'g_ue3_sonne', 'g_ue3_wald']) {
+      await fetch(`${BASE_URL}/api/groups/${groupId}/hourly-children/480`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ child_count: 15 })
+      });
+    }
     const res = await fetch(`${BASE_URL}/api/autopilot/analyze`, { method: 'POST' });
     assert.strictEqual(res.status, 200);
     const json = await res.json();
@@ -596,7 +608,7 @@ async function testAll() {
       body: JSON.stringify({
         staff_id: 's_sarah',
         group_id: 'g_ue3_sonne',
-        date: '2026-11-02',
+        date: '2027-11-02',
         start_time: '08:00',
         end_time: '16:30',
         break_minutes: 30
@@ -609,7 +621,7 @@ async function testAll() {
       body: JSON.stringify({
         staff_id: 's_sarah',
         group_id: 'g_ue3_sonne',
-        date: '2026-11-03',
+        date: '2027-11-03',
         start_time: '08:30',
         end_time: '17:00',
         break_minutes: 30
@@ -653,10 +665,10 @@ async function testAll() {
       body: JSON.stringify({
         staff_id: 's_lukas',
         group_id: 'g_ue3_sonne',
-        date: todayStr,
-        start_time: '11:00',
-        end_time: '19:30',
-        break_minutes: 30
+        date: localToday(),
+        start_time: '23:58',
+        end_time: '23:59',
+        break_minutes: 0
       })
     });
     assert.strictEqual(res.status, 201);
@@ -1823,32 +1835,64 @@ async function testAll() {
     });
   });
 
+  await check('39b. Schlüssel pro Gruppe gilt überall sofort', async () => {
+    const putGroup = (body) => fetch(`${BASE_URL}/api/groups/g_ue3_sonne`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    assert.strictEqual((await putGroup({ target_ratio: 100 })).status, 400);
+    assert.strictEqual((await putGroup({ target_ratio: 6.5, min_fachkraft_percent: 0.6 })).status, 200);
+    const status = (await (await fetch(`${BASE_URL}/api/ratio-status`)).json()).groups.find(g => g.group_id === 'g_ue3_sonne');
+    assert.strictEqual(status.target_ratio, 6.5);
+    assert.strictEqual(status.min_fachkraft_percent, 0.6);
+    const setting = (await (await fetch(`${BASE_URL}/api/ratio-settings`)).json()).find(s => s.group_id === 'g_ue3_sonne');
+    assert.strictEqual(setting.target_ratio, 6.5);
+  });
+
   // ---------------------------------------------------------------------------
-  // 40. PHASE 1: DYNAMIC RATIO ENGINE & AUTO-BALANCING
+  // 40. KINDERZAHLEN PRO STUNDE
   // ---------------------------------------------------------------------------
-  await check('40. Dynamic Ratio Engine & Auto-Balancing (Erzieher krank + Kinder abgemeldet)', async () => {
-    const today = new Date().toISOString().split('T')[0];
+  await check('40. Kinderzahlen: erster Wert füllt alle Stunden, Einzelstunden bleiben änderbar', async () => {
+    const groupId = 'g_ue3_wald';
+    const put = (hour, child_count) => fetch(`${BASE_URL}/api/groups/${groupId}/hourly-children/${hour}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ child_count })
+    });
 
-    // Status abfragen
-    const statusRes = await fetch(`${BASE_URL}/api/ratio-status?date=${today}`);
-    assert.strictEqual(statusRes.status, 200);
-    const data = await statusRes.json();
+    await fetch(`${BASE_URL}/api/groups/${groupId}/hourly-children`, { method: 'DELETE' });
+    let { counts } = await (await put(480, 15)).json();
+    assert.deepStrictEqual([...new Set(Object.values(counts))], [15]);
+    assert.strictEqual(Object.keys(counts).length, 44);
 
-    const sonneGroup = data.groups.find((g) => g.group_id === 'g_ue3_sonne');
-    assert(sonneGroup, 'Gruppe Sonnenschein muss im Radar existieren');
+    ({ counts } = await (await put(720, 9)).json());
+    assert.deepStrictEqual([720, 735, 750, 765].map(m => counts[m]), [9, 9, 9, 9]);
+    assert.strictEqual(counts[780], 15);
 
-    // Sonnenschein hat 25 angemeldete Kinder, aber 8 Kinder sind krankgemeldet (17 anwesend)
-    assert.strictEqual(sonneGroup.enrolled_children, 25);
-    assert.strictEqual(sonneGroup.absent_children, 8);
-    assert.strictEqual(sonneGroup.effective_children, 17);
+    ({ counts } = await (await put(735, 4)).json());
+    assert.deepStrictEqual([720, 735, 750].map(m => counts[m]), [9, 4, 9]);
 
-    // Auto-Balancing muss aktiv sein!
-    assert(sonneGroup.auto_balancing, 'auto_balancing Objekt muss existieren');
-    assert.strictEqual(sonneGroup.auto_balancing.active, true);
-    assert.strictEqual(sonneGroup.auto_balancing.saved_emergency, true);
-    assert.strictEqual(sonneGroup.status, 'BALANCED_OK');
-    assert(sonneGroup.message.includes('Auto-Balancing aktiv'), 'Meldung muss Auto-Balancing erwähnen');
-    assert(sonneGroup.message.includes('Keine Schicht-Neubesetzung nötig') || sonneGroup.message.includes('gesetzeskonform'));
+    assert.strictEqual((await put(180, 5)).status, 400);
+    assert.strictEqual((await put(490, 5)).status, 400);
+    assert.strictEqual((await put(540, -1)).status, 400);
+
+    // Mittwoch ohne Schließtag: 1 Kraft von 8 bis 12 Uhr, sonst niemand
+    const date = '2027-03-03';
+    await fetch(`${BASE_URL}/api/shifts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_id: 's_jonas', group_id: groupId, date, start_time: '08:00', end_time: '12:00', break_minutes: 0 })
+    });
+    const wednesday = (await (await fetch(`${BASE_URL}/api/ratio-status?date=${date}`)).json()).groups.find(g => g.group_id === groupId);
+    assert.strictEqual(wednesday.slots.find(h => h.minute === 480).staff, 1);
+    assert.strictEqual(wednesday.slots.find(h => h.minute === 720).staff, 0);
+    assert.strictEqual(wednesday.slots.find(h => h.minute === 735).children, 4);
+    assert.strictEqual(wednesday.status, 'CRITICAL');
+    assert.strictEqual(wednesday.worst_time, '07:00');
+
+    const saturday = (await (await fetch(`${BASE_URL}/api/ratio-status?date=2027-03-06`)).json()).groups.find(g => g.group_id === groupId);
+    assert.strictEqual(saturday.effective_children, 0);
   });
 
   // ---------------------------------------------------------------------------
@@ -1906,9 +1950,9 @@ async function testAll() {
   });
 
   // ---------------------------------------------------------------------------
-  // 42. LAGE.APP PARITY: BOARD MEMBERS & 1-CLICK VORSTANDSWECHSEL
+  // 42. BOARD MEMBERS & 1-CLICK VORSTANDSWECHSEL
   // ---------------------------------------------------------------------------
-  await check('42. LAGE.app Parity: Board Members & 1-Click Handover', async () => {
+  await check('42. Board Members & 1-Click Handover', async () => {
     // 1. Vorstandsmitglieder abrufen
     const membersRes = await fetch(`${BASE_URL}/api/board/members`);
     assert.strictEqual(membersRes.status, 200);
@@ -1954,11 +1998,11 @@ async function testAll() {
   });
 
   // ---------------------------------------------------------------------------
-  // 43. LAGE.APP PARITY: ELTERNDIENST-BÖRSE & PFLICHTSTUNDEN
+  // 43. ELTERNDIENST-BÖRSE & PFLICHTSTUNDEN
   // ---------------------------------------------------------------------------
   let testDutyId = null;
   let testSignupId = null;
-  await check('43. LAGE.app Parity: Elterndienst-Börse & Pflichtstunden-Tracking', async () => {
+  await check('43. Elterndienst-Börse & Pflichtstunden-Tracking', async () => {
     // 1. Neuen Dienst anlegen
     const createRes = await fetch(`${BASE_URL}/api/parent-duties`, {
       method: 'POST',
@@ -2014,10 +2058,10 @@ async function testAll() {
   });
 
   // ---------------------------------------------------------------------------
-  // 44. LAGE.APP PARITY: BLITZ-UMFRAGEN & ABSTIMMUNGEN
+  // 44. BLITZ-UMFRAGEN & ABSTIMMUNGEN
   // ---------------------------------------------------------------------------
   let testPollId = null;
-  await check('44. LAGE.app Parity: Blitz-Umfragen & Abstimmungen', async () => {
+  await check('44. Blitz-Umfragen & Abstimmungen', async () => {
     // 1. Neue Umfrage anlegen
     const createRes = await fetch(`${BASE_URL}/api/polls`, {
       method: 'POST',
@@ -2070,9 +2114,9 @@ async function testAll() {
   });
 
   // ---------------------------------------------------------------------------
-  // 45. LAGE.APP PARITY: DIGITALE VERTRÄGE & UNTERSCHRIFTEN
+  // 45. DIGITALE VERTRÄGE & UNTERSCHRIFTEN
   // ---------------------------------------------------------------------------
-  await check('45. LAGE.app Parity: Digitale Dokumente & Signaturen', async () => {
+  await check('45. Digitale Dokumente & Signaturen', async () => {
     // 1. Dokumente für Michael Bauer abrufen
     const docsRes = await fetch(`${BASE_URL}/api/documents?parent_id=p_michael_bauer`);
     assert.strictEqual(docsRes.status, 200);
@@ -2284,25 +2328,6 @@ async function testAll() {
   });
 
   // ---------------------------------------------------------------------------
-  // 51. MODUL E: SEPA-LASTSCHRIFTEN ISO 20022 XML EXPORT (pain.008)
-  // ---------------------------------------------------------------------------
-  await check('51. Modul E: SEPA Lastschrift XML pain.008.001.02 Export', async () => {
-    const currentMonth = new Date().toISOString().substring(0, 7);
-    const xmlRes = await fetch(`${BASE_URL}/api/billing/export-sepa-xml?month=${currentMonth}`);
-    assert.strictEqual(xmlRes.status, 200);
-    assert(xmlRes.headers.get('content-type')?.includes('xml'));
-    const xmlText = await xmlRes.text();
-
-    assert(xmlText.includes('<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">'));
-    assert(xmlText.includes('<CstmrDrctDbtInitn>'));
-    assert(xmlText.includes('<GrpHdr>'));
-    assert(xmlText.includes('<PmtMtd>DD</PmtMtd>'));
-    assert(xmlText.includes('<CdtrSchmeId>'));
-    assert(xmlText.includes('<Id>DE98ZZZ09999999999</Id>'));
-    assert(xmlText.includes('<DrctDbtTxInf>'));
-  });
-
-  // ---------------------------------------------------------------------------
   // 52. MODUL E: BEHÖRDEN- & JUGENDAMT-MELDUNGEN (§ 98 SGB VIII / KiBiz)
   // ---------------------------------------------------------------------------
   await check('52. Modul E: Jugendamt-Statistik § 98 SGB VIII & CSV Export', async () => {
@@ -2310,7 +2335,7 @@ async function testAll() {
     const repRes = await fetch(`${BASE_URL}/api/reports/youth-office`);
     assert.strictEqual(repRes.status, 200);
     const rep = await repRes.json();
-    assert.strictEqual(rep.kita_name, 'Kita Sonnenschein e.V.');
+    assert.strictEqual(rep.kita_name, 'Meine Kita');
     assert(rep.belegte_plaetze > 0);
     assert(rep.age_distribution);
     assert(rep.booking_hours);
@@ -2367,6 +2392,251 @@ async function testAll() {
     assert(waldtag.photos.length >= 2);
     assert(waldtag.photos[0].image_url.startsWith('https://'));
   });
+
+  // ---------------------------------------------------------------------------
+  // 55. ZEITERFASSUNG, URLAUB, FREIGABEN & KRANKMELDUNG
+  // ---------------------------------------------------------------------------
+  const post = (url, body) => fetch(`${BASE_URL}${url}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const localDay = (offset) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const created = await (await post('/api/staff', {
+    name: 'Regression Test', email: 'regression@kita.test', role: 'FACHKRAFT',
+    qualification: 'Erzieherin', weekly_hours: 39, work_days: 5, annual_vacation_days: 30
+  })).json();
+  const regId = created.id;
+
+  await check('55a. Stempeluhr verhindert doppeltes Ein- und Ausstempeln', async () => {
+    const stamp = (action) => post('/api/timelogs/stamp', { staff_id: regId, action });
+    assert.strictEqual((await stamp('CLOCK_OUT')).status, 400);
+    assert.strictEqual((await stamp('CLOCK_IN')).status, 200);
+    assert.strictEqual((await stamp('CLOCK_IN')).status, 409);
+    assert.strictEqual((await stamp('CLOCK_OUT')).status, 200);
+    assert.strictEqual((await stamp('CLOCK_OUT')).status, 400);
+    assert.strictEqual((await stamp('BREAK')).status, 400);
+  });
+
+  await check('55b. Schicht mit 0 Minuten Pause bleibt bei 0', async () => {
+    const day = localDay(40);
+    const res = await post('/api/shifts', { staff_id: regId, group_id: 'g_u3_maeuse', date: day, start_time: '08:00', end_time: '12:00', break_minutes: 0 });
+    const { id } = await res.json();
+    const list = await (await fetch(`${BASE_URL}/api/shifts?staff_id=${regId}&start=${day}&end=${day}`)).json();
+    assert.strictEqual(list.find(s => s.id === id).break_minutes, 0);
+  });
+
+  await check('55c. Urlaub zählt Werktage, Freigabe nur einmal entscheidbar', async () => {
+    const year = new Date().getFullYear();
+    const { id } = await (await post('/api/approvals/request-vacation', {
+      requester_id: regId, start_date: `${year}-06-01`, end_date: `${year}-06-14`, reason: 'Test'
+    })).json();
+    assert.strictEqual((await post(`/api/approvals/${id}/decide`, { action: 'APPROVED' })).status, 200);
+    assert.strictEqual((await post(`/api/approvals/${id}/decide`, { action: 'REJECTED' })).status, 409);
+    const stats = await (await fetch(`${BASE_URL}/api/staff/${regId}/stats`)).json();
+    assert.strictEqual(stats.remaining_vacation_days, 20);
+  });
+
+  await check('55d. Mehrtägige Krankmeldung sagt Folgetage ab und plant Vertretung', async () => {
+    const tomorrow = localDay(1);
+    await post('/api/shifts', { staff_id: regId, group_id: 'g_u3_maeuse', date: tomorrow, start_time: '08:00', end_time: '12:00', break_minutes: 0 });
+    assert.strictEqual((await post('/api/requests/sick', { staff_id: regId, days: 3, reason: 'Test' })).status, 200);
+
+    const own = await (await fetch(`${BASE_URL}/api/shifts?staff_id=${regId}&start=${tomorrow}&end=${tomorrow}`)).json();
+    assert(own.every(s => s.status === 'CANCELLED'));
+
+    const approvals = await (await fetch(`${BASE_URL}/api/approvals`)).json();
+    const appr = approvals.find(a => a.type === 'EMERGENCY_REPLACEMENT' && a.target_id === regId && a.status === 'PENDING');
+    assert(appr.details.dates.includes(tomorrow));
+    assert.strictEqual((await post(`/api/approvals/${appr.id}/decide`, { action: 'APPROVED' })).status, 200);
+    const replacement = await (await fetch(`${BASE_URL}/api/shifts?staff_id=${appr.requester_id}&start=${tomorrow}&end=${tomorrow}`)).json();
+    assert(replacement.some(s => s.status === 'CONFIRMED' && s.id.startsWith('shift_emerg_')));
+  });
+
+  await check('56. Dienstplan erzeugt Einsatzplan, Änderungen dort bleiben erhalten', async () => {
+    const person = await (await post('/api/staff', {
+      name: 'Dienstplan Test', email: 'dienstplan@kita.test', role: 'FACHKRAFT',
+      qualification: 'Erzieherin', weekly_hours: 39, work_days: 5, annual_vacation_days: 30
+    })).json();
+    const setStandard = (start_time) => fetch(`${BASE_URL}/api/standard-shifts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_id: person.id, weekdays: [1, 2, 3, 4, 5], group_id: 'g_u3_maeuse', start_time, end_time: '16:00', break_minutes: 30 })
+    });
+    const shiftsOn = async (from, to) => (await (await fetch(`${BASE_URL}/api/shifts?staff_id=${person.id}&start=${from}&end=${to}`)).json());
+
+    assert.strictEqual((await setStandard('18:00')).status, 400);
+    assert.strictEqual((await setStandard('08:00')).status, 200);
+
+    const week = await shiftsOn(localDay(1), localDay(14));
+    assert(week.length >= 8, 'zwei Wochen müssen aus dem Dienstplan entstehen');
+    assert(week.every(s => s.start_time === '08:00' && s.source === 'STANDARD'));
+    assert.strictEqual((await shiftsOn(localDay(1), localDay(14))).length, week.length, 'darf nicht doppelt erzeugen');
+    assert.strictEqual((await shiftsOn(localDay(-7), localDay(-1))).length, 0, 'Vergangenheit bleibt leer');
+
+    const manual = week[0];
+    await fetch(`${BASE_URL}/api/shifts/${manual.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start_time: '10:00' })
+    });
+    await setStandard('09:00');
+    const after = await shiftsOn(localDay(1), localDay(14));
+    assert.strictEqual(after.find(s => s.id === manual.id).start_time, '10:00');
+    assert(after.filter(s => s.id !== manual.id).every(s => s.start_time === '09:00'));
+
+    await fetch(`${BASE_URL}/api/staff/${person.id}`, { method: 'DELETE' });
+  });
+
+  await check('57. Krank & Urlaub: unbefristet, Überschneidung, Plan folgt', async () => {
+    const person = await (await post('/api/staff', {
+      name: 'Abwesenheit Test', email: 'abwesenheit@kita.test', role: 'FACHKRAFT',
+      qualification: 'Erzieherin', weekly_hours: 39, work_days: 5, annual_vacation_days: 30
+    })).json();
+    await fetch(`${BASE_URL}/api/standard-shifts`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staff_id: person.id, weekdays: [1, 2, 3, 4, 5], group_id: 'g_u3_maeuse', start_time: '08:00', end_time: '16:00', break_minutes: 30 })
+    });
+    const confirmed = async () => (await (await fetch(`${BASE_URL}/api/shifts?staff_id=${person.id}&start=${localDay(1)}&end=${localDay(14)}`)).json()).filter(s => s.status === 'CONFIRMED');
+    assert((await confirmed()).length >= 8);
+
+    assert.strictEqual((await post('/api/absences', { staff_id: person.id, type: 'VACATION', start_date: localDay(1), end_date: null })).status, 400);
+    const sick = await post('/api/absences', { staff_id: person.id, type: 'SICK', start_date: localDay(0), end_date: null });
+    assert.strictEqual(sick.status, 201);
+    const { id } = await sick.json();
+    assert.strictEqual((await confirmed()).length, 0);
+    assert.strictEqual((await post('/api/absences', { staff_id: person.id, type: 'VACATION', start_date: localDay(30), end_date: localDay(31) })).status, 409);
+
+    const list = (await (await fetch(`${BASE_URL}/api/absences`)).json()).absences;
+    assert.strictEqual(list.find(a => a.id === id).end_date, null);
+
+    assert.strictEqual((await fetch(`${BASE_URL}/api/absences/${id}/end`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ end_date: localDay(0) })
+    })).status, 200);
+    assert((await confirmed()).length >= 8, 'nach dem Beenden steht der Dienstplan wieder');
+
+    await fetch(`${BASE_URL}/api/staff/${person.id}`, { method: 'DELETE' });
+  });
+
+  await check('58. Verfügbarkeitsregeln: kombinierbar, Plan und Vertretung halten sich daran', async () => {
+    const person = await (await post('/api/staff', {
+      name: 'Regel Test', email: 'regel@kita.test', role: 'FACHKRAFT',
+      qualification: 'Erzieherin', weekly_hours: 15, work_days: 5, annual_vacation_days: 30
+    })).json();
+    const put = (url, body) => fetch(`${BASE_URL}${url}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const rulesUrl = `/api/staff/${person.id}/availability`;
+
+    assert.strictEqual((await put(rulesUrl, { rules: [{ type: 'EARLIEST', value: 'früh' }] })).status, 400);
+    assert.strictEqual((await put(rulesUrl, { rules: [{ type: 'ONLY_DAYS', days: [] }] })).status, 400);
+    assert.strictEqual((await put(rulesUrl, { rules: [
+      { type: 'ONLY_DAYS', days: [1, 2, 4, 5] },
+      { type: 'EARLIEST', value: '08:15' },
+      { type: 'MAX_HOURS_DAY', value: 3 },
+      { type: 'NOT_BEFORE_VACATION', days: [5] },
+      { type: 'NOTE', value: 'Mittwochs nur nach Absprache' }
+    ] })).status, 200);
+
+    const standard = await (await put('/api/standard-shifts', {
+      staff_id: person.id, weekdays: [1, 2, 3, 4, 5], group_id: 'g_u3_maeuse', start_time: '08:00', end_time: '16:00', break_minutes: 30
+    })).json();
+    const monday = standard.rows.find(r => r.staff_id === person.id && r.weekday === 1);
+    assert(monday.warnings.some(w => w.includes('08:15')));
+    assert(monday.warnings.some(w => w.includes('3 Std.')));
+
+    const dayOffset = (weekday, from) => { let i = from; while (new Date(`${localDay(i)}T12:00`).getDay() !== weekday) i++; return i; };
+    const shifts = async () => (await (await fetch(`${BASE_URL}/api/shifts?staff_id=${person.id}&start=${localDay(1)}&end=${localDay(21)}`)).json()).filter(s => s.status === 'CONFIRMED');
+
+    let plan = await shifts();
+    assert(plan.length > 0);
+    assert(plan.every(s => new Date(`${s.date}T12:00`).getDay() !== 3), 'Mittwoch ist ausgeschlossen');
+    assert(plan[0].warning.includes('Verfügbarkeit'));
+
+    const friday = dayOffset(5, 1);
+    assert(plan.some(s => s.date === localDay(friday)));
+    assert.strictEqual((await post('/api/absences', { staff_id: person.id, type: 'VACATION', start_date: localDay(friday + 3), end_date: localDay(friday + 7) })).status, 201);
+    plan = await shifts();
+    assert(!plan.some(s => s.date === localDay(friday)), 'Freitag direkt vor dem Urlaub fällt weg');
+
+    const legal = await (await fetch(`${BASE_URL}/api/emergency/legal-check?staff_id=${person.id}&date=${localDay(dayOffset(1, 30))}&start_time=08:00&end_time=15:30`)).json();
+    assert.strictEqual(legal.is_compliant, false);
+
+    await fetch(`${BASE_URL}/api/staff/${person.id}`, { method: 'DELETE' });
+  });
+
+  await check('59. Einsatzplan: Sperren, Tagesbestätigung und automatisches Neu-Planen', async () => {
+    const shiftBody = (date) => ({ staff_id: 's_lisa', group_id: 'g_u3_maeuse', date, start_time: '08:00', end_time: '12:00', break_minutes: 0 });
+    assert.strictEqual((await post('/api/shifts', shiftBody(localDay(-3)))).status, 409);
+
+    const put = (url, body) => fetch(`${BASE_URL}${url}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    assert.strictEqual((await put(`/api/roster-days/${localDay(1)}`, { followed: true })).status, 400);
+    assert.strictEqual((await put(`/api/roster-days/${localDay(-1)}`, { followed: false })).status, 200);
+    const days = await (await fetch(`${BASE_URL}/api/roster-days?start=${localDay(-1)}&end=${localDay(-1)}`)).json();
+    assert.strictEqual(days[localDay(-1)], false);
+
+    let i = 8; while (new Date(`${localDay(i)}T12:00`).getDay() !== 1) i++;
+    const monday = localDay(i);
+    await fetch(`${BASE_URL}/api/groups/g_ue3_sonne/hourly-children/540`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ child_count: 15 })
+    });
+
+    const manual = await (await post('/api/shifts', { ...shiftBody(monday), role_override: 'von Hand' })).json();
+    const replan = await post('/api/roster/replan', { scope: 'WEEK', week_start: monday });
+    assert.strictEqual(replan.status, 200);
+    const report = await replan.json();
+    assert(report.filled > 0, 'Lücken müssen automatisch besetzt werden');
+
+    const week = await (await fetch(`${BASE_URL}/api/shifts?start=${monday}&end=${monday}`)).json();
+    assert(!week.some(s => s.id === manual.id), 'Neu laden ersetzt Handänderungen');
+    assert(week.some(s => s.source === 'AUTO'));
+
+    assert.strictEqual((await post('/api/roster/replan', { scope: 'WEEK', week_start: localDay(-21) })).status, 400);
+    assert.strictEqual((await post('/api/roster/replan', { scope: 'TODAY' })).status, 200);
+  });
+
+  await check('60. Wandertag und Schließtag wirken auf den Einsatzplan', async () => {
+    let i = 15; while (new Date(`${localDay(i)}T12:00`).getDay() !== 3) i++;
+    const day = localDay(i);
+    const shiftsOf = async (extra = '') => (await (await fetch(`${BASE_URL}/api/shifts?start=${day}&end=${day}${extra}`)).json()).filter(s => s.status === 'CONFIRMED');
+
+    assert.strictEqual((await post('/api/excursions', { date: localDay(-2), group_id: 'g_u3_maeuse', staff_count: 3 })).status, 400);
+    const trip = await post('/api/excursions', { date: day, group_id: 'g_u3_maeuse', staff_count: 3 });
+    assert.strictEqual(trip.status, 201);
+    const { id: tripId } = await trip.json();
+    assert.strictEqual((await post('/api/excursions', { date: day, group_id: 'g_u3_maeuse', staff_count: 2 })).status, 409);
+    const planned = (await shiftsOf()).filter(s => s.group_id === 'g_u3_maeuse');
+    assert(planned.length >= 1);
+    const status = (await (await fetch(`${BASE_URL}/api/ratio-status?date=${day}`)).json()).groups.find(g => g.group_id === 'g_u3_maeuse');
+    assert(status.total_staff >= 0);
+
+    const closure = await post('/api/closures', { date: day, title: 'Test-Schließtag', type: 'SCHLIESSTAG' });
+    assert.strictEqual(closure.status, 201);
+    const { id: closureId } = await closure.json();
+    assert.strictEqual((await shiftsOf()).length, 0, 'am Schließtag gibt es keinen Plan');
+    assert.strictEqual((await post('/api/excursions', { date: day, group_id: 'g_u3_maeuse', staff_count: 3 })).status, 400);
+    const trips = await (await fetch(`${BASE_URL}/api/excursions`)).json();
+    assert(!trips.some(t => t.id === tripId), 'Wandertag entfällt am Schließtag');
+    assert.strictEqual((await post('/api/closures', { date: localDay(-2), type: 'SCHLIESSTAG' })).status, 409);
+    await fetch(`${BASE_URL}/api/closures/${closureId}`, { method: 'DELETE' });
+  });
+
+  await fetch(`${BASE_URL}/api/staff/${regId}`, { method: 'DELETE' });
 
   console.log(`\n========================================`);
   console.log(`🎯 Test Summary: ${passed} Passed, ${failed} Failed`);

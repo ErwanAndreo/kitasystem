@@ -2,13 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { RatioSetting } from '../types';
 import { 
   Sliders, 
-  ShieldCheck, 
-  Clock, 
-  HelpCircle, 
   Check, 
   Sparkles, 
-  AlertTriangle, 
-  Info,
   BookOpen
 } from 'lucide-react';
 
@@ -136,15 +131,13 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
   return (
     <div className="space-y-6">
       {/* Header Bar */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
             <Sliders className="w-5 h-5 text-indigo-600" />
-            <span>Betreuungsschlüssel & Gesetzes-Konfiguration</span>
+            <span>Betreuungsschlüssel</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Ebene 3: Gesetzliche Vorgaben, Bundesland-Standards, Toleranzgrenzen & Zwei-Kräfte-Aufsichtspflicht
-          </p>
+          <p className="text-xs text-slate-500 mt-1">Bundesland-Vorgaben, Toleranzen und Zwei-Kräfte-Regel.</p>
         </div>
 
         <div className="flex items-center space-x-2 bg-indigo-50 border border-indigo-200 px-3.5 py-2 rounded-2xl text-xs text-indigo-800 font-bold">
@@ -155,10 +148,10 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
 
       <form onSubmit={handleSaveSettings} className="space-y-6">
         {/* 1. Bundesland 1-Click Presets */}
-        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
           <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center space-x-2">
             <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>1-Klick Bundesland-Vorlagen</span>
+            <span>Bundesland-Vorlagen</span>
           </h3>
           <p className="text-xs text-slate-500 mb-4">
             Wähle dein Bundesland, um die offiziell empfohlenen Fachkraft-Kind-Schlüssel und Fachkraftquoten zu laden:
@@ -178,18 +171,18 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
                   onClick={() => handleApplyPreset(p.id)}
                   className={`p-4 rounded-2xl border transition-all cursor-pointer ${
                     isSelected
-                      ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20 shadow-xs'
+                      ? 'bg-indigo-50/70 border-indigo-500 ring-2 ring-indigo-500/20'
                       : 'bg-slate-50/60 border-slate-200 hover:bg-slate-100/60'
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="font-extrabold text-xs text-slate-900">{p.name}</span>
+                    <span className="font-semibold text-xs text-slate-900">{p.name}</span>
                     {isSelected && <Check className="w-4 h-4 text-indigo-600" />}
                   </div>
-                  <div className="text-[11px] font-bold text-indigo-700">
+                  <div className="text-xs font-bold text-indigo-700">
                     U3: {p.u3} • Ü3: {p.ue3}
                   </div>
-                  <p className="text-[10px] text-slate-400 mt-1">{p.desc}</p>
+                  <p className="text-xs text-slate-400 mt-1">{p.desc}</p>
                 </div>
               );
             })}
@@ -197,7 +190,7 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
         </div>
 
         {/* 2. Detailed Parameter Sliders & Number Inputs */}
-        <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm space-y-6">
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-6">
           <h3 className="text-sm font-bold text-slate-900 mb-1">Individuelle Schlüssel & Toleranzen</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -205,11 +198,11 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
               <div className="flex justify-between items-center mb-1">
                 <label className="text-xs font-bold text-slate-800">Soll-Schlüssel Krippe (U3)</label>
-                <span className="text-xs font-mono font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
+                <span className="text-xs font-mono font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
                   1 : {targetU3.toFixed(2)}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mb-3">Rechnerische Kinderanzahl pro Fachkraft in der Krippe.</p>
+              <p className="text-xs text-slate-500 mb-3">Rechnerische Kinderanzahl pro Fachkraft in der Krippe.</p>
               <input
                 type="range"
                 min="2.5"
@@ -225,11 +218,11 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
               <div className="flex justify-between items-center mb-1">
                 <label className="text-xs font-bold text-slate-800">Soll-Schlüssel Kindergarten (Ü3)</label>
-                <span className="text-xs font-mono font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
+                <span className="text-xs font-mono font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200">
                   1 : {targetUe3.toFixed(1)}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mb-3">Rechnerische Kinderanzahl pro Fachkraft im Elementarbereich.</p>
+              <p className="text-xs text-slate-500 mb-3">Rechnerische Kinderanzahl pro Fachkraft im Elementarbereich.</p>
               <input
                 type="range"
                 min="6.0"
@@ -245,11 +238,11 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
               <div className="flex justify-between items-center mb-1">
                 <label className="text-xs font-bold text-slate-800">Gelbe Ampel (Toleranzpuffer)</label>
-                <span className="text-xs font-mono font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
+                <span className="text-xs font-mono font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200">
                   +{warningThreshold}%
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mb-3">Ab welcher prozentualen Überschreitung die Ampel auf Gelb springt.</p>
+              <p className="text-xs text-slate-500 mb-3">Ab welcher prozentualen Überschreitung die Ampel auf Gelb springt.</p>
               <input
                 type="range"
                 min="5"
@@ -265,11 +258,11 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
               <div className="flex justify-between items-center mb-1">
                 <label className="text-xs font-bold text-slate-800">Rote Ampel (Akuter Notfallalarm)</label>
-                <span className="text-xs font-mono font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
+                <span className="text-xs font-mono font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-lg border border-rose-200">
                   +{criticalThreshold}%
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 mb-3">Löst automatische Einspring-Kaskade und Leitungs-Warnung aus.</p>
+              <p className="text-xs text-slate-500 mb-3">Löst automatische Einspring-Kaskade und Leitungs-Warnung aus.</p>
               <input
                 type="range"
                 min="15"
@@ -288,7 +281,7 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex items-start justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-900 block">Zwei-Kräfte-Aufsichtsregel</span>
-                <p className="text-[11px] text-slate-500 mt-0.5">
+                <p className="text-xs text-slate-500 mt-0.5">
                   Verpflichtet mind. 2 Betreuungspersonen pro geöffneter Gruppe (unabhängig von der Kinderzahl), außer in Randzeiten.
                 </p>
               </div>
@@ -318,7 +311,7 @@ export const RatioSettingsView: React.FC<RatioSettingsViewProps> = ({ showToast 
                   className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold"
                 />
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">Außerhalb dieser Zeiten gelten Randzeiten-Regelungen.</p>
+              <p className="text-xs text-slate-400 mt-1">Außerhalb dieser Zeiten gelten Randzeiten-Regelungen.</p>
             </div>
           </div>
 

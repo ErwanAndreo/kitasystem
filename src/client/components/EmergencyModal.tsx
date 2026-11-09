@@ -6,8 +6,6 @@ import {
   Send, 
   X, 
   Sparkles, 
-  CheckCircle2, 
-  UserCheck, 
   HeartPulse, 
   Baby, 
   GraduationCap 
@@ -96,28 +94,28 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
     switch (skill) {
       case 'U3_QUALIFIKATION':
         return (
-          <span key={skill} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+          <span key={skill} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-xs font-bold bg-purple-100 text-purple-800 border border-purple-200">
             <Baby className="w-3 h-3 text-purple-600" />
             <span>U3-Zertifikat</span>
           </span>
         );
       case 'ERSTE_HILFE_KIND':
         return (
-          <span key={skill} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+          <span key={skill} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200">
             <HeartPulse className="w-3 h-3 text-rose-600" />
             <span>Ersthelfer</span>
           </span>
         );
       case 'INKLUSION':
         return (
-          <span key={skill} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+          <span key={skill} className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded-md text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200">
             <GraduationCap className="w-3 h-3 text-amber-600" />
             <span>Inklusion</span>
           </span>
         );
       default:
         return (
-          <span key={skill} className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-700">
+          <span key={skill} className="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700">
             {skill}
           </span>
         );
@@ -125,7 +123,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 my-8">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
           <div className="flex items-center space-x-2.5">
@@ -204,7 +202,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
                 Betroffene Stammgruppe: <span className="text-emerald-700">{groupName}</span>
               </span>
               <div className="flex items-center space-x-1.5">
-                <span className="text-[11px] text-slate-500 font-medium">Pflicht-Skills:</span>
+                <span className="text-xs text-slate-500 font-medium">Pflicht-Skills:</span>
                 <div className="flex space-x-1">
                   {requiredSkills.map(getSkillBadge)}
                 </div>
@@ -219,7 +217,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                 <span>Intelligente Springer- & Vertretungsvorschläge (nach Skill-Match gerankt)</span>
               </label>
-              <span className="text-[10px] text-slate-400">
+              <span className="text-xs text-slate-400">
                 Klicken zum Auswählen
               </span>
             </div>
@@ -262,7 +260,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
                               <span className="text-xs font-bold text-slate-900">
                                 {item.name}
                               </span>
-                              <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded-full ${
+                              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
                                 isSpringer
                                   ? 'bg-indigo-100 text-indigo-800'
                                   : isLeitung
@@ -272,13 +270,13 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
                                 {item.role}
                               </span>
                               {item.can_spring && !isSpringer && (
-                                <span className="text-[9px] font-semibold bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded-full">
+                                <span className="text-xs font-semibold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
                                   Springer-Bereitschaft
                                 </span>
                               )}
                             </div>
 
-                            <p className="text-[11px] text-slate-600 mt-0.5">
+                            <p className="text-xs text-slate-600 mt-0.5">
                               {item.note}
                             </p>
 
@@ -290,7 +288,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
 
                         {/* Match Score Badge */}
                         <div className="text-right shrink-0">
-                          <span className={`inline-block px-2 py-0.5 rounded-lg text-[11px] font-bold ${
+                          <span className={`inline-block px-2 py-0.5 rounded-lg text-xs font-bold ${
                             item.has_all_required
                               ? 'bg-emerald-100 text-emerald-800'
                               : 'bg-amber-100 text-amber-800'
@@ -298,7 +296,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
                             {item.has_all_required ? '100% Match' : 'Teil-Match'}
                           </span>
                           {item.is_already_working && (
-                            <span className="block text-[9px] text-amber-600 font-semibold mt-0.5">
+                            <span className="block text-xs text-amber-600 font-semibold mt-0.5">
                               Bereits im Dienst
                             </span>
                           )}
@@ -317,9 +315,9 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>Sicherheit & Einrichtungsleitung-Freigabe</span>
             </div>
-            <p className="text-[11px] text-amber-800 leading-relaxed">
+            <p className="text-xs text-amber-800 leading-relaxed">
               Nach dem Absenden wird der Krankheitsausfall dokumentiert. Der ausgewählte Vertretungsvorschlag 
-              wird im <strong>Freigabe-Center der Leitung</strong> angelegt, wo Sabine Weber mit 1 Klick die verbindliche 
+              wird im <strong>Freigabe-Center der Leitung</strong> angelegt, wo die Leitung mit 1 Klick die verbindliche 
               Schichtaktivierung freigibt.
             </p>
           </div>
@@ -335,7 +333,7 @@ export const EmergencyModal: React.FC<EmergencyModalProps> = ({
             <button
               type="submit"
               disabled={loading || !chosenSubstituteId}
-              className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-xs flex items-center space-x-1.5 disabled:opacity-50 transition-all active:scale-95"
+              className="px-4 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center space-x-1.5 disabled:opacity-50 transition-all active:scale-95"
             >
               <Send className="w-3.5 h-3.5" />
               <span>Krankmeldung & Vertretungsvorschlag einreichen</span>

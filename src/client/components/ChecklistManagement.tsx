@@ -1,27 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Checklist, ChecklistItem, Staff, ShareFavorite, ChecklistShareScope } from '../types';
+import { Checklist, Staff, ShareFavorite, ChecklistShareScope } from '../types';
 import { useLanguage } from '../i18n';
 import { 
   CheckSquare, 
-  Square, 
   Plus, 
   Trash2, 
-  Share2, 
   Lock, 
   Users, 
-  Filter, 
-  Sparkles, 
-  CheckCircle2, 
   Clock, 
   Search,
-  Tag,
   Check,
   Star,
   User,
   ShieldCheck,
-  Bookmark,
-  ChevronRight,
-  Pin
 } from 'lucide-react';
 
 interface ChecklistManagementProps {
@@ -251,7 +242,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
           return {
             ...item,
             done: nextDone,
-            completed_by: nextDone ? 'Sabine Weber (Leitung)' : undefined,
+            completed_by: nextDone ? 'Einrichtungsleitung' : undefined,
             completed_at: nextDone ? new Date().toISOString() : undefined
           };
         });
@@ -269,7 +260,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           item_id: itemId,
-          completed_by: 'Sabine Weber (Leitung)'
+          completed_by: 'Einrichtungsleitung'
         })
       });
 
@@ -357,7 +348,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
       }));
 
     const creator = staffList.find(s => s.id === modalCreatorId);
-    const creatorName = creator ? `${creator.name} (${creator.role === 'LEITUNG' ? 'Leitung' : 'Mitarbeiter'})` : 'Sabine Weber (Leitung)';
+    const creatorName = creator ? `${creator.name} (${creator.role === 'LEITUNG' ? 'Leitung' : 'Mitarbeiter'})` : 'Einrichtungsleitung';
 
     try {
       const isShared = modalShareScope !== 'PRIVATE';
@@ -419,7 +410,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
   return (
     <div className="space-y-6">
       {/* Top Header & Actions */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600">
@@ -449,14 +440,14 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+      <div className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col md:flex-row items-center justify-between gap-3">
         {/* Visibility Filter Tabs */}
         <div className="flex items-center space-x-1.5 w-full md:w-auto">
           <button
             onClick={() => setFilterType('ALL')}
             className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
               filterType === 'ALL'
-                ? 'bg-slate-900 text-white shadow-xs'
+                ? 'bg-slate-900 text-white'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
@@ -466,7 +457,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
             onClick={() => setFilterType('SHARED')}
             className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
               filterType === 'SHARED'
-                ? 'bg-emerald-600 text-white shadow-xs'
+                ? 'bg-emerald-600 text-white'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
@@ -477,7 +468,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
             onClick={() => setFilterType('PRIVATE')}
             className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
               filterType === 'PRIVATE'
-                ? 'bg-indigo-600 text-white shadow-xs'
+                ? 'bg-indigo-600 text-white'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
@@ -537,7 +528,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
             return (
               <div 
                 key={c.id} 
-                className="bg-white rounded-2xl border border-slate-200 shadow-xs flex flex-col overflow-hidden transition-all hover:shadow-md"
+                className="bg-white rounded-2xl border border-slate-200 flex flex-col overflow-hidden transition-all hover:shadow-md"
               >
                 {/* Header with Color Banner */}
                 <div 
@@ -546,7 +537,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center space-x-2 mb-1.5">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wider uppercase ${
+                      <span className={`px-2 py-0.5 rounded-md text-xs font-bold tracking-wider uppercase ${
                         c.category === 'SICHERHEIT' ? 'bg-rose-100 text-rose-700' :
                         c.category === 'ROUTINE' ? 'bg-blue-100 text-blue-700' :
                         c.category === 'AUSFLUG' ? 'bg-emerald-100 text-emerald-700' :
@@ -560,7 +551,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                       <button
                         onClick={() => handleToggleSharing(c)}
                         title="Klicken, um Freigabestatus schnell umzuschalten"
-                        className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold transition-all ${
+                        className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-xs font-bold transition-all ${
                           !c.is_shared || c.share_scope === 'PRIVATE'
                             ? 'bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200'
                             : c.share_scope === 'TODAY_GROUP'
@@ -577,32 +568,32 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                         {!c.is_shared || c.share_scope === 'PRIVATE' ? (
                           <>
                             <Lock className="w-3 h-3 text-slate-500" />
-                            <span>🔒 Nur privat</span>
+                            <span>Nur privat</span>
                           </>
                         ) : c.share_scope === 'TODAY_GROUP' ? (
                           <>
                             <Clock className="w-3 h-3 text-blue-600" />
-                            <span>🏫 Heutige Gruppe {c.shared_group_name ? `(${c.shared_group_name})` : ''}</span>
+                            <span>Heutige Gruppe {c.shared_group_name ? `(${c.shared_group_name})` : ''}</span>
                           </>
                         ) : c.share_scope === 'GROUP' ? (
                           <>
                             <Users className="w-3 h-3 text-indigo-600" />
-                            <span>🏛️ Gruppe: {c.shared_group_name || 'Gruppe'}</span>
+                            <span>Gruppe: {c.shared_group_name || 'Gruppe'}</span>
                           </>
                         ) : c.share_scope === 'PERSONS' ? (
                           <>
                             <User className="w-3 h-3 text-purple-600" />
-                            <span>👤 {c.shared_staff_names && c.shared_staff_names.length > 0 ? c.shared_staff_names.join(', ') : 'Personen'}</span>
+                            <span>{c.shared_staff_names && c.shared_staff_names.length > 0 ? c.shared_staff_names.join(', ') : 'Personen'}</span>
                           </>
                         ) : c.share_scope === 'LEITUNG' ? (
                           <>
                             <ShieldCheck className="w-3 h-3 text-amber-600" />
-                            <span>🛡️ Nur Leitung</span>
+                            <span>Nur Leitung</span>
                           </>
                         ) : (
                           <>
                             <Users className="w-3 h-3 text-emerald-600" />
-                            <span>👥 Gesamt (Alle)</span>
+                            <span>Gesamt (Alle)</span>
                           </>
                         )}
                       </button>
@@ -611,7 +602,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                     <h3 className="text-base font-bold text-slate-900 leading-snug break-words">
                       {c.title}
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5 flex items-center space-x-1">
+                    <p className="text-xs text-slate-400 mt-0.5 flex items-center space-x-1">
                       <span>Erstellt von {c.created_by_name}</span>
                     </p>
                   </div>
@@ -633,7 +624,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                       {completedCount} von {totalCount} erledigt
                     </span>
                     {isAllDone && (
-                      <span className="flex items-center space-x-1 text-emerald-600 font-bold text-[11px] bg-emerald-100 px-2 py-0.5 rounded-full">
+                      <span className="flex items-center space-x-1 text-emerald-600 font-bold text-xs bg-emerald-100 px-2 py-0.5 rounded-full">
                         <Check className="w-3 h-3" />
                         <span>Abgeschlossen</span>
                       </span>
@@ -677,7 +668,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                             {item.text}
                           </p>
                           {item.done && item.completed_by && (
-                            <p className="text-[10px] text-emerald-700 mt-1 flex items-center space-x-1">
+                            <p className="text-xs text-emerald-700 mt-1 flex items-center space-x-1">
                               <span>✓ Erledigt von {item.completed_by}</span>
                               {item.completed_at && (
                                 <span className="text-slate-400">
@@ -723,8 +714,8 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
 
       {/* CREATE MODAL */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-600 flex items-center justify-center">
@@ -742,8 +733,8 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
 
             {/* Template Presets Picker */}
             <div className="mt-4 mb-4">
-              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                ⚡ Schnellauswahl aus Kita-Vorlagen:
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                Schnellauswahl aus Kita-Vorlagen:
               </label>
               <div className="flex flex-wrap gap-2">
                 {TEMPLATES.map((tmpl, idx) => (
@@ -818,11 +809,11 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                 {/* Top 3 Favorites Bar */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[11px] font-bold text-slate-700 flex items-center space-x-1">
+                    <span className="text-xs font-bold text-slate-700 flex items-center space-x-1">
                       <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
                       <span>3 Favoriten oben (Schnellauswahl):</span>
                     </span>
-                    <span className="text-[10px] text-slate-400 font-medium">
+                    <span className="text-xs text-slate-400 font-medium">
                       Ersetzt von unten nach oben (3 → 2 → 1)
                     </span>
                   </div>
@@ -843,12 +834,12 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                           onClick={() => handleSelectFavorite(fav)}
                           className={`p-2 rounded-xl text-left border transition-all relative ${
                             isActive
-                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
                               : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'
                           }`}
                         >
                           <div className="flex items-center justify-between mb-0.5">
-                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded ${
+                            <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${
                               isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
                             }`}>
                               Slot {idx + 1} {idx === 2 ? '(unten)' : idx === 1 ? '(Mitte)' : '(oben)'}
@@ -856,7 +847,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                             <Star className={`w-3 h-3 ${isActive ? 'text-amber-300 fill-amber-300' : 'text-amber-400 fill-amber-400'}`} />
                           </div>
                           <div className="text-xs font-bold truncate">{fav.label}</div>
-                          <div className={`text-[10px] truncate ${isActive ? 'text-emerald-100' : 'text-slate-400'}`}>
+                          <div className={`text-xs truncate ${isActive ? 'text-emerald-100' : 'text-slate-400'}`}>
                             {fav.type === 'GESAMT' ? 'Gesamtes Team' : fav.type === 'TODAY_GROUP' ? 'Heutige Schicht' : fav.type === 'LEITUNG' ? 'Nur Leitung' : 'Benutzerdefiniert'}
                           </div>
                         </button>
@@ -865,7 +856,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                   </div>
 
                   {favoriteFeedback && (
-                    <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5 flex items-center space-x-1.5 font-medium">
+                    <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1.5 flex items-center space-x-1.5 font-medium">
                       <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500 shrink-0" />
                       <span>{favoriteFeedback}</span>
                     </div>
@@ -874,7 +865,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
 
                 {/* Granular Sharing Scope Selection */}
                 <div className="pt-2 border-t border-slate-200">
-                  <label className="text-[11px] font-bold text-slate-700 block mb-1.5">
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">
                     Mit wem teilen? (Gruppe / Kindergruppe / Personen / Leitung):
                   </label>
 
@@ -884,66 +875,66 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                       onClick={() => { setModalShareScope('ALL'); setModalIsShared(true); }}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         modalShareScope === 'ALL'
-                          ? 'bg-slate-900 text-white shadow-xs'
+                          ? 'bg-slate-900 text-white'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      👥 Gesamt (Alle)
+                      Gesamt (Alle)
                     </button>
                     <button
                       type="button"
                       onClick={() => { setModalShareScope('TODAY_GROUP'); setModalIsShared(true); }}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         modalShareScope === 'TODAY_GROUP'
-                          ? 'bg-blue-600 text-white shadow-xs'
+                          ? 'bg-blue-600 text-white'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      🏫 Heutige Gruppe
+                      Heutige Gruppe
                     </button>
                     <button
                       type="button"
                       onClick={() => { setModalShareScope('GROUP'); setModalIsShared(true); }}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         modalShareScope === 'GROUP'
-                          ? 'bg-indigo-600 text-white shadow-xs'
+                          ? 'bg-indigo-600 text-white'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      🏛️ Kindergruppe
+                      Kindergruppe
                     </button>
                     <button
                       type="button"
                       onClick={() => { setModalShareScope('PERSONS'); setModalIsShared(true); }}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         modalShareScope === 'PERSONS'
-                          ? 'bg-purple-600 text-white shadow-xs'
+                          ? 'bg-purple-600 text-white'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      👤 Personen
+                      Personen
                     </button>
                     <button
                       type="button"
                       onClick={() => { setModalShareScope('LEITUNG'); setModalIsShared(true); }}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         modalShareScope === 'LEITUNG'
-                          ? 'bg-amber-600 text-white shadow-xs'
+                          ? 'bg-amber-600 text-white'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      🛡️ Leitung
+                      Leitung
                     </button>
                     <button
                       type="button"
                       onClick={() => { setModalShareScope('PRIVATE'); setModalIsShared(false); }}
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
                         modalShareScope === 'PRIVATE'
-                          ? 'bg-rose-600 text-white shadow-xs'
+                          ? 'bg-rose-600 text-white'
                           : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                       }`}
                     >
-                      🔒 Privat (Nur ich)
+                      Privat (Nur ich)
                     </button>
                   </div>
 
@@ -954,7 +945,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                         <Clock className="w-3.5 h-3.5 text-blue-600" />
                         <span>Dynamische Schicht-Zuweisung:</span>
                       </p>
-                      <p className="text-[11px] text-blue-700 mt-0.5">
+                      <p className="text-xs text-blue-700 mt-0.5">
                         Bleibt bei der Gruppe immer zugeordnet – wird allen Mitarbeitern angezeigt, die heute in dieser Gruppe arbeiten. Dem Ersteller aber immer!
                       </p>
                     </div>
@@ -972,7 +963,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                             targetId: modalSelectedGroup,
                             targetName: modalSelectedGroupName
                           })}
-                          className="text-[10px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-lg flex items-center space-x-1"
+                          className="text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-lg flex items-center space-x-1"
                         >
                           <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                           <span>Zu Favoriten (von unten nach oben)</span>
@@ -998,7 +989,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                     <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-700">Bestimmte Personen auswählen:</span>
-                        <span className="text-[10px] text-slate-400">
+                        <span className="text-xs text-slate-400">
                           {modalSelectedStaffIds.length} ausgewählt
                         </span>
                       </div>
@@ -1023,7 +1014,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                                   className="rounded text-emerald-600 focus:ring-emerald-500 w-3.5 h-3.5"
                                 />
                                 <span className="font-medium">{s.name}</span>
-                                <span className="text-[10px] text-slate-400">({s.role})</span>
+                                <span className="text-xs text-slate-400">({s.role})</span>
                               </label>
 
                               <button
@@ -1035,7 +1026,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                                   targetId: s.id,
                                   targetName: s.name
                                 })}
-                                className="text-[10px] text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-200 flex items-center space-x-1"
+                                className="text-xs text-amber-700 hover:text-amber-800 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded border border-amber-200 flex items-center space-x-1"
                               >
                                 <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
                                 <span>Favorit</span>
@@ -1053,21 +1044,21 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                         <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
                         <span>Nur Kita-Leitung:</span>
                       </p>
-                      <p className="text-[11px] text-amber-800 mt-0.5">
+                      <p className="text-xs text-amber-800 mt-0.5">
                         Nur für Einrichtungsleitung und Administratoren sichtbar (z.B. für vertrauliche Sicherheits- oder Brandschutz-Prüfungen).
                       </p>
                     </div>
                   )}
 
                   {modalShareScope === 'ALL' && (
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      👥 Alle Mitarbeiter der Kita sehen diese Liste und können Aufgaben gemeinsam abhaken.
+                    <p className="text-xs text-slate-500 mt-1">
+                      Alle Mitarbeiter der Kita sehen diese Liste und können Aufgaben gemeinsam abhaken.
                     </p>
                   )}
 
                   {modalShareScope === 'PRIVATE' && (
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      🔒 Nur für dich sichtbar – perfekt für persönliche Portfolio-Vorbereitungen oder Notizen.
+                    <p className="text-xs text-slate-500 mt-1">
+                      Nur für dich sichtbar – perfekt für persönliche Portfolio-Vorbereitungen oder Notizen.
                     </p>
                   )}
                 </div>
@@ -1080,7 +1071,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                   <button
                     type="button"
                     onClick={() => setModalItems([...modalItems, ''])}
-                    className="text-[11px] text-emerald-600 font-bold hover:underline flex items-center space-x-1"
+                    className="text-xs text-emerald-600 font-bold hover:underline flex items-center space-x-1"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Punkt hinzufügen</span>
@@ -1127,7 +1118,7 @@ export const ChecklistManagement: React.FC<ChecklistManagementProps> = ({ staffL
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-all"
+                  className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all"
                 >
                   Checkliste anlegen
                 </button>

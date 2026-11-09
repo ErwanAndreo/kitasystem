@@ -8,12 +8,10 @@ import {
   CheckSquare, 
   Square, 
   Search, 
-  Sparkles, 
   Tag, 
   Save, 
   X, 
   Edit3,
-  Calendar,
   FolderOpen
 } from 'lucide-react';
 
@@ -165,7 +163,7 @@ export const DirectorNotebook: React.FC = () => {
   ];
 
   const colorPalettes = [
-    { color: '#fef08a', name: 'Zitronengelb (OneNote Classic)' },
+    { color: '#fef08a', name: 'Zitronengelb' },
     { color: '#bfdbfe', name: 'Himmelblau' },
     { color: '#bbf7d0', name: 'Pfefferminzgrün' },
     { color: '#e9d5ff', name: 'Flieder / Lavendel' },
@@ -184,11 +182,9 @@ export const DirectorNotebook: React.FC = () => {
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Leitungs-Notizbuch (OneNote-Style)
+                Notizbuch
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Vertrauliche Notizen, Team-Besprechungen, To-Do-Checklisten & Träger-Konzepte für Sabine Weber
-              </p>
+              <p className="text-xs text-slate-500 mt-0.5">Notizen, Besprechungen und Konzepte der Leitung.</p>
             </div>
           </div>
         </div>
@@ -208,7 +204,7 @@ export const DirectorNotebook: React.FC = () => {
 
           <button
             onClick={() => handleOpenNewNote(categoryFilter !== 'ALL' ? categoryFilter : 'TEAM')}
-            className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold shadow-xs transition-all active:scale-95"
+            className="flex items-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all active:scale-95"
           >
             <Plus className="w-4 h-4" />
             <span>Neue Notiz anlegen</span>
@@ -228,7 +224,7 @@ export const DirectorNotebook: React.FC = () => {
               onClick={() => setCategoryFilter(cat.id)}
               className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                 isSelected
-                  ? 'bg-indigo-600 text-white shadow-xs'
+                  ? 'bg-indigo-600 text-white'
                   : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
               }`}
             >
@@ -268,7 +264,7 @@ export const DirectorNotebook: React.FC = () => {
                 key={note.id}
                 onClick={() => handleEditNote(note)}
                 style={{ backgroundColor: note.color }}
-                className={`p-5 rounded-2xl border border-black/10 shadow-xs hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between min-h-[220px] ${
+                className={`p-5 rounded-2xl border border-black/10 hover:shadow-md transition-all cursor-pointer relative group flex flex-col justify-between min-h-[220px] ${
                   note.is_pinned ? 'ring-2 ring-indigo-500/40' : ''
                 }`}
               >
@@ -276,11 +272,11 @@ export const DirectorNotebook: React.FC = () => {
                   {/* Card Header */}
                   <div className="flex items-start justify-between gap-2 pb-2">
                     <div className="flex items-center space-x-1.5">
-                      <span className="text-[10px] uppercase tracking-wider font-extrabold px-2 py-0.5 rounded-full bg-black/10 text-slate-800">
+                      <span className="text-xs uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full bg-black/10 text-slate-800">
                         {note.category}
                       </span>
                       {hasChecklist && (
-                        <span className="text-[10px] font-bold text-slate-700 bg-white/60 px-1.5 py-0.5 rounded-md">
+                        <span className="text-xs font-bold text-slate-700 bg-white/60 px-1.5 py-0.5 rounded-md">
                           {doneCount}/{note.checklist.length} Erledigt
                         </span>
                       )}
@@ -334,13 +330,13 @@ export const DirectorNotebook: React.FC = () => {
                           ) : (
                             <Square className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                           )}
-                          <span className={`text-[11px] truncate ${item.done ? 'line-through text-slate-500' : 'text-slate-800 font-medium'}`}>
+                          <span className={`text-xs truncate ${item.done ? 'line-through text-slate-500' : 'text-slate-800 font-medium'}`}>
                             {item.text}
                           </span>
                         </div>
                       ))}
                       {note.checklist.length > 3 && (
-                        <div className="text-[10px] text-slate-500 italic">
+                        <div className="text-xs text-slate-500 italic">
                           +{note.checklist.length - 3} weitere Aufgaben...
                         </div>
                       )}
@@ -349,7 +345,7 @@ export const DirectorNotebook: React.FC = () => {
                 </div>
 
                 {/* Footer timestamp */}
-                <div className="text-[10px] text-slate-500 mt-4 pt-2 border-t border-black/5 flex items-center justify-between">
+                <div className="text-xs text-slate-500 mt-4 pt-2 border-t border-black/5 flex items-center justify-between">
                   <span>Aktualisiert: {new Date(note.updated_at).toLocaleDateString('de-DE')}</span>
                   <span className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity font-semibold text-slate-700">
                     <Edit3 className="w-3 h-3" />
@@ -364,10 +360,10 @@ export const DirectorNotebook: React.FC = () => {
 
       {/* Modal for creating / editing note */}
       {modalOpen && editingNote && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div 
             style={{ backgroundColor: editingNote.color || '#fef08a' }}
-            className="rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-black/10 my-6 transition-colors"
+            className="rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-black/10 my-6 transition-colors"
           >
             <div className="flex items-center justify-between pb-3 border-b border-black/10">
               <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -401,7 +397,7 @@ export const DirectorNotebook: React.FC = () => {
 
                 {/* Color swatches */}
                 <div className="flex items-center space-x-1.5">
-                  <span className="text-[11px] font-bold text-slate-600 mr-1">Farbe:</span>
+                  <span className="text-xs font-bold text-slate-600 mr-1">Farbe:</span>
                   {colorPalettes.map((cp) => (
                     <button
                       key={cp.color}
@@ -410,7 +406,7 @@ export const DirectorNotebook: React.FC = () => {
                       style={{ backgroundColor: cp.color }}
                       title={cp.name}
                       className={`w-6 h-6 rounded-full border-2 transition-transform ${
-                        editingNote.color === cp.color ? 'border-slate-800 scale-110 shadow-xs' : 'border-black/20 hover:scale-105'
+                        editingNote.color === cp.color ? 'border-slate-800 scale-110' : 'border-black/20 hover:scale-105'
                       }`}
                     />
                   ))}
@@ -524,7 +520,7 @@ export const DirectorNotebook: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 text-xs font-bold bg-slate-900 hover:bg-black text-white rounded-xl shadow-xs flex items-center space-x-1.5"
+                    className="px-5 py-2 text-xs font-bold bg-slate-900 hover:bg-black text-white rounded-xl flex items-center space-x-1.5"
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Notiz speichern</span>

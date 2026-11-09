@@ -1,3 +1,4 @@
+import { notifyError } from '../notify';
 import React, { useState, useEffect } from 'react';
 import { Group, PolicyTemplate } from '../types';
 import { 
@@ -5,13 +6,9 @@ import {
   Plus, 
   Trash2, 
   Edit3, 
-  ShieldCheck, 
-  Baby, 
-  Sparkles, 
   Layers, 
   Check, 
   X,
-  AlertCircle
 } from 'lucide-react';
 
 interface GroupManagementProps {
@@ -117,7 +114,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
       setModalOpen(false);
       await onRefresh();
     } catch (err: any) {
-      alert(err.message);
+      notifyError(err.message);
     }
   };
 
@@ -128,7 +125,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
       setDeleteConfirmId(null);
       await onRefresh();
     } catch (err: any) {
-      alert(err.message);
+      notifyError(err.message);
     }
   };
 
@@ -151,13 +148,10 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
               <Layers className="w-5 h-5" />
             </div>
             <h2 className="text-lg font-bold text-slate-900">
-              Gruppen & Betreuungsschlüssel-Richtlinien
+              Gruppen
             </h2>
           </div>
-          <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-            Lege Gruppen deiner Einrichtung an (z. B. Krippe, Kindergarten, Waldgruppe) und weise ihnen modulare Schlüssel-Richtlinien zu. 
-            Die Richtlinien steuern die Live-Betreuungsberechnung und Fachkraftquote.
-          </p>
+          <p className="text-xs text-slate-500 mt-1 max-w-2xl">Gruppen anlegen und ihnen eine Schlüssel-Richtlinie zuweisen.</p>
         </div>
 
         <button
@@ -178,7 +172,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
           return (
             <div
               key={grp.id}
-              className="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 relative overflow-hidden flex flex-col justify-between hover:border-slate-300 transition-all"
+              className="bg-white rounded-2xl border border-slate-200 p-5 relative overflow-hidden flex flex-col justify-between hover:border-slate-300 transition-all"
             >
               {/* Top Color Accent */}
               <div
@@ -191,7 +185,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="flex items-center space-x-2.5">
                     <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold shadow-xs shrink-0"
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold shrink-0"
                       style={{ backgroundColor: grp.color }}
                     >
                       {grp.name.slice(0, 2).toUpperCase()}
@@ -200,14 +194,14 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
                       <h3 className="text-sm font-bold text-slate-900 leading-tight">
                         {grp.name}
                       </h3>
-                      <span className="text-[10px] text-slate-400 font-medium">
+                      <span className="text-xs text-slate-400 font-medium">
                         ID: {grp.id}
                       </span>
                     </div>
                   </div>
 
                   <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                       isU3
                         ? 'bg-rose-100 text-rose-800'
                         : isMixed
@@ -220,30 +214,23 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
                 </div>
 
                 {/* Key Metrics */}
-                <div className="grid grid-cols-3 gap-2 my-4 bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
+                <div className="grid grid-cols-2 gap-2 my-4 bg-slate-50 p-3 rounded-xl border border-slate-100 text-center">
                   <div>
-                    <span className="text-[10px] text-slate-400 block font-medium">Kinder</span>
-                    <span className="text-sm font-extrabold text-slate-800 flex items-center justify-center space-x-1">
-                      <Baby className="w-3.5 h-3.5 text-slate-400" />
-                      <span>{grp.child_count}</span>
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block font-medium">Soll-Schlüssel</span>
-                    <span className="text-sm font-extrabold text-slate-800">
+                    <span className="text-xs text-slate-400 block font-medium">Soll-Schlüssel</span>
+                    <span className="text-sm font-semibold text-slate-800">
                       1 : {grp.target_ratio.toFixed(1)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 block font-medium">Fachkraftquote</span>
-                    <span className="text-sm font-extrabold text-emerald-700">
+                    <span className="text-xs text-slate-400 block font-medium">Fachkraftquote</span>
+                    <span className="text-sm font-semibold text-emerald-700">
                       {Math.round(grp.min_fachkraft_percent * 100)} %
                     </span>
                   </div>
                 </div>
 
                 {/* Assigned Policy Description */}
-                <div className="text-[11px] text-slate-500 bg-slate-50/60 p-2.5 rounded-lg border border-dashed border-slate-200">
+                <div className="text-xs text-slate-500 bg-slate-50/60 p-2.5 rounded-lg border border-dashed border-slate-200">
                   <span className="font-semibold text-slate-700">Richtlinie: </span>
                   {isU3
                     ? 'Krippen-Schlüssel nach KiBiz (max. 3.3 Kinder pro Betreuer, 67% Fachkräfte)'
@@ -265,16 +252,16 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
 
                 {deleteConfirmId === grp.id ? (
                   <div className="flex items-center space-x-1">
-                    <span className="text-[10px] text-rose-600 font-bold">Wirklich?</span>
+                    <span className="text-xs text-rose-600 font-bold">Wirklich?</span>
                     <button
                       onClick={() => handleDelete(grp.id)}
-                      className="bg-rose-600 text-white text-[10px] px-2 py-0.5 rounded font-bold hover:bg-rose-700"
+                      className="bg-rose-600 text-white text-xs px-2 py-0.5 rounded font-bold hover:bg-rose-700"
                     >
                       Ja
                     </button>
                     <button
                       onClick={() => setDeleteConfirmId(null)}
-                      className="text-slate-400 text-[10px] px-1 hover:text-slate-700"
+                      className="text-slate-400 text-xs px-1 hover:text-slate-700"
                     >
                       Nein
                     </button>
@@ -296,8 +283,8 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
 
       {/* Modal: Create or Edit Group */}
       {modalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center space-x-2">
                 <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
@@ -336,7 +323,7 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   Schlüssel-Richtlinie zuweisen (Vorlage)
                 </label>
-                <p className="text-[11px] text-slate-500 mb-2">
+                <p className="text-xs text-slate-500 mb-2">
                   Wähle eine Standard-Richtlinie aus. Schlüssel & Fachkraftquote werden automatisch vorbelegt.
                 </p>
                 <div className="grid grid-cols-2 gap-2">
@@ -354,10 +341,10 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
                         }`}
                       >
                         <div className="flex items-center justify-between mb-1">
-                          <span className="font-bold text-[11px] truncate">{pol.name.split('(')[0]}</span>
+                          <span className="font-bold text-xs truncate">{pol.name.split('(')[0]}</span>
                           {isSelected && <Check className="w-3.5 h-3.5 text-emerald-600" />}
                         </div>
-                        <div className="text-[10px] text-slate-500 font-normal">
+                        <div className="text-xs text-slate-500 font-normal">
                           1:{pol.target_ratio.toFixed(1)} • {Math.round(pol.min_fachkraft_percent * 100)}% FK
                         </div>
                       </button>
@@ -368,20 +355,6 @@ export const GroupManagement: React.FC<GroupManagementProps> = ({ groups, onRefr
 
               {/* Custom Overrides if needed */}
               <div className="grid grid-cols-3 gap-3 pt-1">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Anzahl Kinder *
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    required
-                    value={formData.child_count}
-                    onChange={e => setFormData({ ...formData, child_count: parseInt(e.target.value, 10) || 1 })}
-                    className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-                  />
-                </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">

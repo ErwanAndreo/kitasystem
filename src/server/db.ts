@@ -8,6 +8,9 @@ export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// Demo-Inhalte nur in Datenbanken, die schon die Demo-Belegschaft haben; Neuinstallationen bleiben leer.
+const hasDemoData = () => !!db.prepare("SELECT 1 FROM staff WHERE id = 's_lukas'").get();
+
 export function initDb() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS staff (
@@ -68,6 +71,53 @@ export function initDb() {
       role_override TEXT,
       warning TEXT,
       FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS standard_shifts (
+      staff_id TEXT NOT NULL,
+      weekday INTEGER NOT NULL CHECK (weekday BETWEEN 1 AND 5),
+      group_id TEXT NOT NULL,
+      start_time TEXT NOT NULL,
+      end_time TEXT NOT NULL,
+      break_minutes INTEGER NOT NULL DEFAULT 30,
+      PRIMARY KEY (staff_id, weekday),
+      FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS roster_day_status (
+      date TEXT PRIMARY KEY,
+      followed INTEGER NOT NULL,
+      decided_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS roster_generated_days (
+      date TEXT PRIMARY KEY
+    );
+
+    CREATE TABLE IF NOT EXISTS group_quarter_children (
+      group_id TEXT NOT NULL,
+      slot INTEGER NOT NULL,
+      child_count INTEGER NOT NULL,
+      PRIMARY KEY (group_id, slot),
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS excursions (
+      id TEXT PRIMARY KEY,
+      date TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      staff_count INTEGER NOT NULL,
+      UNIQUE (date, group_id),
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS group_hourly_children (
+      group_id TEXT NOT NULL,
+      hour INTEGER NOT NULL,
+      child_count INTEGER NOT NULL,
+      PRIMARY KEY (group_id, hour),
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
     );
 
@@ -326,7 +376,7 @@ export function initDb() {
       dietary_needs TEXT,
       medication_plan TEXT,
       emergency_instructions TEXT,
-      measles_vaccinated INTEGER NOT NULL DEFAULT 1,
+      measles_vaccinated INTEGER NOT NULL DEFAULT 0,
       doctor_name TEXT,
       doctor_phone TEXT,
       FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
@@ -377,7 +427,7 @@ export function initDb() {
       parent_id TEXT NOT NULL,
       child_id TEXT NOT NULL,
       is_primary_contact INTEGER NOT NULL DEFAULT 1,
-      photo_consent INTEGER NOT NULL DEFAULT 1,
+      photo_consent INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (parent_id, child_id),
       FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE,
       FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE
@@ -397,7 +447,7 @@ export function initDb() {
       FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
     );
 
-    -- LAGE.app Parity: Elterndienste, Arbeitseinsätze & Pflichtstunden
+    -- Elterndienste, Arbeitseinsätze & Pflichtstunden
     CREATE TABLE IF NOT EXISTS parent_duties (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -426,7 +476,7 @@ export function initDb() {
       FOREIGN KEY (parent_id) REFERENCES parent_accounts(id) ON DELETE CASCADE
     );
 
-    -- LAGE.app Parity: Blitz-Umfragen & Abstimmungen
+    -- Blitz-Umfragen & Abstimmungen
     CREATE TABLE IF NOT EXISTS parent_polls (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -460,7 +510,7 @@ export function initDb() {
       UNIQUE(poll_id, parent_id, option_id)
     );
 
-    -- LAGE.app Parity: Digitale Verträge & Signaturen
+    -- Digitale Verträge & Signaturen
     CREATE TABLE IF NOT EXISTS digital_documents (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
@@ -622,7 +672,7 @@ export function initDb() {
 
   // Populate kita closures seed if empty
   const closureCount = db.prepare('SELECT COUNT(*) as count FROM kita_closures').get() as { count: number };
-  if (closureCount.count === 0) {
+  if (hasDemoData() && closureCount.count === 0) {
     const insertClosure = db.prepare(`
       INSERT INTO kita_closures (id, title, date, type, notes)
       VALUES (?, ?, ?, ?, ?)
@@ -635,7 +685,7 @@ export function initDb() {
 
   // Populate certifications seed if empty
   const certCount = db.prepare('SELECT COUNT(*) as count FROM staff_certifications').get() as { count: number };
-  if (certCount.count === 0) {
+  if (hasDemoData() && certCount.count === 0) {
     const insertCert = db.prepare(`
       INSERT INTO staff_certifications (id, staff_id, type, title, issue_date, expires_at, institution, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -659,7 +709,7 @@ export function initDb() {
 
   // Populate OneNote-style director notes seed if empty
   const notesCount = db.prepare('SELECT COUNT(*) as count FROM director_notes').get() as { count: number };
-  if (notesCount.count === 0) {
+  if (hasDemoData() && notesCount.count === 0) {
     const insertNote = db.prepare(`
       INSERT INTO director_notes (id, category, title, content, color, is_pinned, checklist, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -723,7 +773,7 @@ export function initDb() {
   const thisFriday = format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 4), 'yyyy-MM-dd');
   const thisWednesday = format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 2), 'yyyy-MM-dd');
 
-  db.prepare(`
+  if (hasDemoData()) db.prepare(`
     INSERT OR IGNORE INTO staff_wishes (id, staff_id, date, type, note, created_at)
     VALUES 
       ('w_1', 's_elena', ?, 'WUNSCH_FRUEH', 'Bitte Frühdienst wegen Facharzt-Termin ab 16:30 Uhr', ?),
@@ -731,6 +781,17 @@ export function initDb() {
   `).run(thisFriday, new Date().toISOString(), thisWednesday, new Date().toISOString());
 
   // Migrate columns if needed
+  db.transaction(() => {
+    db.exec(`
+      INSERT OR IGNORE INTO group_quarter_children (group_id, slot, child_count)
+      SELECT group_id, hour * 60 + q.m, child_count FROM group_hourly_children
+      CROSS JOIN (SELECT 0 AS m UNION ALL SELECT 15 UNION ALL SELECT 30 UNION ALL SELECT 45) q;
+      DELETE FROM group_hourly_children;
+    `);
+  })();
+  try { db.prepare("ALTER TABLE timelogs ADD COLUMN break_started_at TEXT").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE staff ADD COLUMN availability_rules TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
+  try { db.prepare("ALTER TABLE shifts ADD COLUMN source TEXT NOT NULL DEFAULT 'MANUAL'").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE staff ADD COLUMN skills TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE staff ADD COLUMN secondary_roles TEXT NOT NULL DEFAULT '[]'").run(); } catch (_) {}
   try { db.prepare("ALTER TABLE staff ADD COLUMN can_spring INTEGER NOT NULL DEFAULT 0").run(); } catch (_) {}
@@ -755,7 +816,7 @@ export function initDb() {
 
   // Populate checklists seed if empty
   const checklistCount = db.prepare('SELECT COUNT(*) as count FROM checklists').get() as { count: number };
-  if (checklistCount.count === 0) {
+  if (hasDemoData() && checklistCount.count === 0) {
     const insertChk = db.prepare(`
       INSERT INTO checklists (id, title, category, created_by_id, created_by_name, is_shared, color, items, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -834,10 +895,19 @@ export function initDb() {
   }
 
   // Check if seeding or updating skills is needed
-  updateStaffSkillsSeed();
+  if (hasDemoData()) updateStaffSkillsSeed();
 
   // Populate children, emergency contacts, health records, attendance and ratio settings
   seedChildModuleData();
+
+  // Neuinstallation: ohne Leitung kann sich niemand anmelden (admin / admin bis zur Passwortänderung).
+  // Die Oberfläche spricht die Leitung fest als s_sabine an, daher diese ID.
+  if (!db.prepare('SELECT 1 FROM staff LIMIT 1').get()) {
+    db.prepare(`
+      INSERT INTO staff (id, name, email, role, qualification, weekly_hours, avatar)
+      VALUES ('s_sabine', 'Einrichtungsleitung', '', 'LEITUNG', 'Leitung', 39, 'EL')
+    `).run();
+  }
 }
 
 function seedChildModuleData() {
@@ -854,10 +924,14 @@ function seedChildModuleData() {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     insertRatio.run('rs_default', null, 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
-    insertRatio.run('rs_u3', 'g_u3_maeuse', 3.33, 15.0, 25.0, 1, '08:30', '12:30', 0.67, 'NRW_KIBIZ');
-    insertRatio.run('rs_ue3_sonne', 'g_ue3_sonne', 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
-    insertRatio.run('rs_ue3_wald', 'g_ue3_wald', 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
+    if (hasDemoData()) {
+      insertRatio.run('rs_u3', 'g_u3_maeuse', 3.33, 15.0, 25.0, 1, '08:30', '12:30', 0.67, 'NRW_KIBIZ');
+      insertRatio.run('rs_ue3_sonne', 'g_ue3_sonne', 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
+      insertRatio.run('rs_ue3_wald', 'g_ue3_wald', 8.0, 15.0, 25.0, 1, '09:00', '13:00', 0.50, 'NRW_KIBIZ');
+    }
   }
+
+  if (!hasDemoData()) return;
 
   // 2. Children & related records
   const childCount = db.prepare('SELECT COUNT(*) as count FROM children').get() as { count: number };
@@ -1006,7 +1080,7 @@ function seedChildModuleData() {
   insertParentLink.run('p_anna_bergmann', 'c_u3_1', 1, 1);
   insertParentLink.run('p_michael_bauer', 'c_ue3_s1', 1, 1);
 
-  // LAGE.app Seed: Elterndienste & Arbeitseinsätze
+  // Seed: Elterndienste & Arbeitseinsätze
   const dutyCount = db.prepare('SELECT COUNT(*) as count FROM parent_duties').get() as { count: number };
   if (dutyCount.count === 0) {
     const insertDuty = db.prepare(`
@@ -1045,7 +1119,7 @@ function seedChildModuleData() {
     insertSignup.run('signup_1', 'duty_1', 'p_anna_bergmann', 4.0, 'CONFIRMED', 'Sabine Weber', now, now);
   }
 
-  // LAGE.app Seed: Blitz-Umfragen
+  // Seed: Blitz-Umfragen
   const pollCount = db.prepare('SELECT COUNT(*) as count FROM parent_polls').get() as { count: number };
   if (pollCount.count === 0) {
     db.prepare(`
@@ -1069,7 +1143,7 @@ function seedChildModuleData() {
     insertOpt.run('opt_3', 'poll_1', 'Samstag, 26. Juni (14:00 - 18:00 Uhr)', 4);
   }
 
-  // LAGE.app Seed: Digitale Dokumente & Signaturen
+  // Seed: Digitale Dokumente & Signaturen
   const docCount = db.prepare('SELECT COUNT(*) as count FROM digital_documents').get() as { count: number };
   if (docCount.count === 0) {
     const insertDoc = db.prepare(`

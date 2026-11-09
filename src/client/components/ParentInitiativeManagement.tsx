@@ -4,18 +4,14 @@ import {
   Users, 
   Clock, 
   Calendar, 
-  CheckCircle2, 
-  AlertTriangle, 
   Plus, 
   Vote, 
   FileSignature, 
   ArrowRightLeft, 
   Award, 
-  Sparkles, 
   Check, 
   X, 
   ShieldCheck,
-  Briefcase
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -208,15 +204,13 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
   return (
     <div className="space-y-6">
       {/* Header Bar */}
-      <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
             <Building2 className="w-5 h-5 text-indigo-600" />
-            <span>Elterninitiative & Trägerverein (LAGE.app Parität)</span>
+            <span>Träger & Verein</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Pflichtstunden-Börse • 1-Klick-Vorstandswechsel • Blitz-Umfragen • Digitale Verträge
-          </p>
+          <p className="text-xs text-slate-500 mt-1">Elterndienste, Vorstand, Umfragen und Verträge.</p>
         </div>
 
         {/* Sub-tab Navigation */}
@@ -224,7 +218,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
           <button
             onClick={() => setSubTab('DUTIES')}
             className={`px-3.5 py-2 rounded-xl transition-all whitespace-nowrap flex items-center space-x-1.5 ${
-              subTab === 'DUTIES' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              subTab === 'DUTIES' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Clock className="w-3.5 h-3.5" />
@@ -234,7 +228,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
           <button
             onClick={() => setSubTab('BOARD')}
             className={`px-3.5 py-2 rounded-xl transition-all whitespace-nowrap flex items-center space-x-1.5 ${
-              subTab === 'BOARD' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              subTab === 'BOARD' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <ArrowRightLeft className="w-3.5 h-3.5" />
@@ -244,7 +238,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
           <button
             onClick={() => setSubTab('POLLS')}
             className={`px-3.5 py-2 rounded-xl transition-all whitespace-nowrap flex items-center space-x-1.5 ${
-              subTab === 'POLLS' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              subTab === 'POLLS' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <Vote className="w-3.5 h-3.5" />
@@ -254,7 +248,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
           <button
             onClick={() => setSubTab('DOCS')}
             className={`px-3.5 py-2 rounded-xl transition-all whitespace-nowrap flex items-center space-x-1.5 ${
-              subTab === 'DOCS' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              subTab === 'DOCS' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
             <FileSignature className="w-3.5 h-3.5" />
@@ -273,7 +267,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
             </h3>
             <button
               onClick={() => setShowDutyModal(true)}
-              className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
+              className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors"
             >
               <Plus className="w-4 h-4" />
               <span>Neuen Elterndienst ausschreiben</span>
@@ -285,18 +279,18 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
             {duties.map(d => {
               const isFilled = d.status === 'FILLED';
               return (
-                <div key={d.id} className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
+                <div key={d.id} className="bg-white rounded-2xl p-5 border border-slate-200 flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">
                         {d.category}
                       </span>
-                      <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg border border-emerald-200">
                         +{d.hours_credit} Std. Gutschrift
                       </span>
                     </div>
 
-                    <h4 className="font-extrabold text-sm text-slate-900 mb-1 leading-snug">
+                    <h4 className="font-semibold text-sm text-slate-900 mb-1 leading-snug">
                       {d.title}
                     </h4>
                     <p className="text-xs text-slate-500 mb-3 leading-relaxed">
@@ -317,19 +311,19 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
                     {/* Signups List */}
                     {d.signups && d.signups.length > 0 && (
                       <div className="space-y-1 mb-3">
-                        <span className="text-[10px] font-bold uppercase text-slate-400">Angemeldete Eltern:</span>
+                        <span className="text-xs font-bold uppercase text-slate-400">Angemeldete Eltern:</span>
                         {d.signups.map((s: any) => (
                           <div key={s.id} className="flex items-center justify-between text-xs bg-white p-2 rounded-lg border border-slate-200">
                             <span className="font-bold text-slate-800">{s.parent_name}</span>
                             {s.status === 'CONFIRMED' ? (
-                              <span className="text-emerald-700 font-bold text-[10px] bg-emerald-50 px-2 py-0.5 rounded flex items-center space-x-1">
+                              <span className="text-emerald-700 font-bold text-xs bg-emerald-50 px-2 py-0.5 rounded flex items-center space-x-1">
                                 <Check className="w-3 h-3" />
                                 <span>{s.hours_credited}h bestätigt</span>
                               </span>
                             ) : (
                               <button
                                 onClick={() => handleConfirmHours(s.id, d.hours_credit)}
-                                className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold"
+                                className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold"
                               >
                                 Bestätigen (+{d.hours_credit}h)
                               </button>
@@ -345,7 +339,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
           </div>
 
           {/* Family Hours Overview Table */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center space-x-2">
               <Award className="w-4 h-4 text-amber-500" />
               <span>Pflichtstunden-Konto pro Familie (Soll: 20 Std. / Kita-Jahr)</span>
@@ -353,7 +347,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
 
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-[10px]">
+                <thead className="bg-slate-50 text-slate-600 font-bold uppercase text-xs">
                   <tr>
                     <th className="py-2.5 px-3 rounded-l-xl">Familie / Elternteil</th>
                     <th className="py-2.5 px-3">Pflichtstunden Soll</th>
@@ -371,11 +365,11 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
                       <td className="py-3 px-3 text-rose-600 font-bold">{f.open_hours}h</td>
                       <td className="py-3 px-3">
                         {f.is_fulfilled ? (
-                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded-full text-xs">
                             ✓ Erfüllt
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 bg-amber-100 text-amber-800 font-bold rounded-full text-[10px]">
+                          <span className="px-2 py-0.5 bg-amber-100 text-amber-800 font-bold rounded-full text-xs">
                             In Bearbeitung
                           </span>
                         )}
@@ -402,37 +396,37 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
 
             <button
               onClick={() => setShowHandoverModal(true)}
-              className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
+              className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors"
             >
               <ArrowRightLeft className="w-4 h-4" />
-              <span>1-Klick Amtsübergabe durchführen</span>
+              <span>Amtsübergabe durchführen</span>
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {boardMembers.map(m => (
-              <div key={m.id} className="bg-white rounded-3xl p-5 border border-indigo-200 shadow-sm flex items-start justify-between">
+              <div key={m.id} className="bg-white rounded-2xl p-5 border border-indigo-200 shadow-sm flex items-start justify-between">
                 <div className="flex items-start space-x-3.5">
-                  <div className="w-12 h-12 rounded-2xl bg-indigo-100 border border-indigo-300 flex items-center justify-center font-black text-indigo-800 text-sm">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-100 border border-indigo-300 flex items-center justify-center font-semibold text-indigo-800 text-sm">
                     {m.name[0]}V
                   </div>
                   <div>
                     <div className="flex items-center space-x-2">
-                      <h4 className="font-extrabold text-sm text-slate-900">{m.name}</h4>
-                      <span className="px-2 py-0.5 bg-indigo-600 text-white font-bold rounded-full text-[10px]">
+                      <h4 className="font-semibold text-sm text-slate-900">{m.name}</h4>
+                      <span className="px-2 py-0.5 bg-indigo-600 text-white font-bold rounded-full text-xs">
                         {m.board_position === '1_VORSITZ' ? '1. Vorsitzende:r' : m.board_position}
                       </span>
                     </div>
                     <p className="text-xs text-slate-500 mt-0.5">{m.email} • {m.phone || 'Kein Telefon'}</p>
                     {m.children && m.children.length > 0 && (
-                      <div className="mt-2 text-[11px] text-slate-600">
+                      <div className="mt-2 text-xs text-slate-600">
                         Kind(er): <strong>{m.children.map((c: any) => `${c.first_name} (${c.group_name})`).join(', ')}</strong>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
+                <span className="inline-flex items-center space-x-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-xl border border-emerald-200">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Träger-Rechte aktiv</span>
                 </span>
@@ -449,7 +443,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
             <h3 className="text-sm font-bold text-slate-900">Aktive Eltern-Umfragen ({polls.length})</h3>
             <button
               onClick={() => setShowPollModal(true)}
-              className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors"
+              className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition-colors"
             >
               <Plus className="w-4 h-4" />
               <span>Neue Umfrage starten</span>
@@ -458,9 +452,9 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {polls.map(p => (
-              <div key={p.id} className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs">
+              <div key={p.id} className="bg-white rounded-2xl p-5 border border-slate-200">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase">
                     {p.category}
                   </span>
                   <span className="text-xs font-bold text-slate-400">
@@ -468,7 +462,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
                   </span>
                 </div>
 
-                <h4 className="font-extrabold text-sm text-slate-900 mb-1">{p.title}</h4>
+                <h4 className="font-semibold text-sm text-slate-900 mb-1">{p.title}</h4>
                 <p className="text-xs text-slate-600 mb-4">{p.question}</p>
 
                 {/* Progress bars per option */}
@@ -503,9 +497,9 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
             {documents.map(doc => {
               const isSigned = doc.status === 'SIGNED';
               return (
-                <div key={doc.id} className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex items-start justify-between">
+                <div key={doc.id} className="bg-white rounded-2xl p-5 border border-slate-200 flex items-start justify-between">
                   <div className="space-y-1">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 uppercase">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 uppercase">
                       {doc.document_type}
                     </span>
                     <h4 className="font-bold text-sm text-slate-900">{doc.title}</h4>
@@ -536,14 +530,14 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
         </div>
       )}
 
-      {/* Modal: 1-Klick Amtsübergabe */}
+      {/* Modal: Amtsübergabe */}
       {showHandoverModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
                 <ArrowRightLeft className="w-5 h-5 text-indigo-600" />
-                <span>1-Klick-Amtsübergabe (Vorstand)</span>
+                <span>Amtsübergabe (Vorstand)</span>
               </h3>
               <button onClick={() => setShowHandoverModal(false)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-5 h-5" />
@@ -615,7 +609,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"
                 >
                   Amtsübergabe ausführen
                 </button>
@@ -627,8 +621,8 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
 
       {/* Modal: New Duty */}
       {showDutyModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
                 <Plus className="w-5 h-5 text-indigo-600" />
@@ -725,7 +719,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"
                 >
                   Dienst ausschreiben
                 </button>
@@ -737,8 +731,8 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
 
       {/* Modal: New Poll */}
       {showPollModal && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
                 <Vote className="w-5 h-5 text-indigo-600" />
@@ -810,7 +804,7 @@ export const ParentInitiativeManagement: React.FC<ParentInitiativeManagementProp
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-xs"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold"
                 >
                   Umfrage freischalten
                 </button>

@@ -1,35 +1,24 @@
+import { notifyError } from '../notify';
 import React, { useState, useEffect } from 'react';
 import { Staff, Shift, Approval, Checklist, ShareFavorite, ChecklistShareScope } from '../types';
 import { 
   Clock, 
   ArrowRightLeft, 
   Palmtree, 
-  CheckCircle2, 
-  AlertCircle, 
-  Calendar, 
-  Play, 
-  Square, 
   User, 
-  Sparkles,
-  Send,
-  Coffee,
   AlertTriangle,
   Megaphone,
   UserCheck,
-  Shield,
-  FileText,
   Bell,
-  TrendingUp,
   Lightbulb,
-  CheckSquare,
   Check,
   Lock,
   Key,
   Plus,
   Users,
-  Trash2,
   Star,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { de } from 'date-fns/locale';
@@ -49,7 +38,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   onRequestSwap,
   onRequestVacation
 }) => {
-  const [currentStaffId, setCurrentStaffId] = useState<string>(staffList[5]?.id || staffList[1]?.id || 's_lukas');
+  const [currentStaffId, setCurrentStaffId] = useState<string>(staffList[5]?.id || staffList[1]?.id || staffList[0]?.id || '');
   const [activeTab, setActiveTab] = useState<'HOME' | 'ROSTER' | 'CHECKLISTS' | 'SWAP' | 'CHANGES' | 'BOARD'>('HOME');
 
   const [groupNotes, setGroupNotes] = useState<any[]>([]);
@@ -64,7 +53,15 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
   const [newChecklistTitle, setNewChecklistTitle] = useState('');
   const [newChecklistIsShared, setNewChecklistIsShared] = useState(true);
   const [newChecklistScope, setNewChecklistScope] = useState<ChecklistShareScope>('ALL');
-  const [newChecklistGroup, setNewChecklistGroup] = useState('g_u3_maeuse');
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([]);
+  const [newChecklistGroup, setNewChecklistGroup] = useState('');
+
+  useEffect(() => {
+    fetch('/api/groups').then(res => res.json()).then((data) => {
+      setGroups(data);
+      setNewChecklistGroup(data[0]?.id ?? '');
+    }).catch(console.error);
+  }, []);
   const [newChecklistStaffId, setNewChecklistStaffId] = useState('');
   const [mobileFavorites, setMobileFavorites] = useState<ShareFavorite[]>([
     { id: 'fav_gesamt', type: 'GESAMT', label: 'Gesamt (Alle)', icon: 'users', targetId: null },
@@ -192,10 +189,10 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
         setSickSuccessMsg('Krankmeldung übermittelt & Leitung benachrichtigt! Gute Besserung.');
         await loadDetails();
       } else {
-        alert(data.error || 'Fehler beim Übermitteln');
+        notifyError(data.error || 'Fehler beim Übermitteln');
       }
     } catch (e: any) {
-      alert('Netzwerkfehler: ' + e.message);
+      notifyError('Netzwerkfehler: ' + e.message);
     } finally {
       setSickSubmitting(false);
     }
@@ -411,10 +408,10 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
           {/* Header */}
           <div className="bg-emerald-600 text-white p-4 pt-3">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-bold text-emerald-200 tracking-wider">
+              <span className="text-xs font-bold text-emerald-200 tracking-wider">
                 MITARBEITER-APP
               </span>
-              <div className="flex items-center space-x-1 text-[10px] bg-emerald-700/60 px-2 py-0.5 rounded-full">
+              <div className="flex items-center space-x-1 text-xs bg-emerald-700/60 px-2 py-0.5 rounded-full">
                 <span>SIMULATION:</span>
                 <select
                   value={currentStaffId}
@@ -440,7 +437,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
               <div className="min-w-0">
                 <h3 className="font-bold text-base leading-tight truncate">{currentUser?.name}</h3>
                 <p className="text-xs text-emerald-100">{currentUser?.qualification}</p>
-                <p className="text-[10px] text-emerald-200 font-semibold mt-0.5">
+                <p className="text-xs text-emerald-200 font-semibold mt-0.5">
                   Vertrag: {currentUser?.weekly_hours}h/Woche • {currentUser?.work_days || 5} Tage
                 </p>
               </div>
@@ -451,7 +448,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
           <div className="grid grid-cols-6 border-b border-slate-200 bg-white text-center">
             <button
               onClick={() => setActiveTab('HOME')}
-              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-xs font-bold border-b-2 transition-all ${
                 activeTab === 'HOME' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
@@ -459,23 +456,23 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('ROSTER')}
-              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-xs font-bold border-b-2 transition-all ${
                 activeTab === 'ROSTER' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
               Plan
             </button>
-            <button
+            {/* <button
               onClick={() => setActiveTab('CHECKLISTS')}
-              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-xs font-bold border-b-2 transition-all ${
                 activeTab === 'CHECKLISTS' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
               Listen
-            </button>
+            </button> */}
             <button
               onClick={() => setActiveTab('SWAP')}
-              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-xs font-bold border-b-2 transition-all ${
                 activeTab === 'SWAP' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
@@ -483,7 +480,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('CHANGES')}
-              className={`py-2 text-[10px] font-bold border-b-2 transition-all relative ${
+              className={`py-2 text-xs font-bold border-b-2 transition-all relative ${
                 activeTab === 'CHANGES' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500'
               }`}
             >
@@ -494,7 +491,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             </button>
             <button
               onClick={() => setActiveTab('BOARD')}
-              className={`py-2 text-[10px] font-bold border-b-2 transition-all ${
+              className={`py-2 text-xs font-bold border-b-2 transition-all ${
                 activeTab === 'BOARD' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500'
               }`}
             >
@@ -512,22 +509,22 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   (() => {
                     const isCritical = pendingEmergencyReq.is_critical !== false && userAlertsMode === 'CRITICAL';
                     return isCritical ? (
-                      <div className="bg-rose-50 border-2 border-rose-500 rounded-2xl p-4 shadow-sm animate-pulse space-y-3">
+                      <div className="bg-rose-50 border-2 border-rose-500 rounded-2xl p-4 shadow-sm space-y-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center space-x-2">
                             <div className="p-1.5 bg-rose-600 text-white rounded-lg">
                               <AlertTriangle className="w-4 h-4" />
                             </div>
                             <div>
-                              <div className="text-xs font-extrabold text-rose-950 uppercase tracking-wider">
-                                🚨 Notfall-Alarm: Spontan aushelfen
+                              <div className="text-xs font-semibold text-rose-950 uppercase tracking-wider">
+                                Notfall-Alarm: Spontan aushelfen
                               </div>
-                              <div className="text-[10px] text-rose-700 font-semibold">
+                              <div className="text-xs text-rose-700 font-semibold">
                                 Rechtlicher Rahmen (ArbZG § 3 & § 5) geprüft ✓
                               </div>
                             </div>
                           </div>
-                          <span className="text-[10px] bg-rose-200 text-rose-900 font-black px-2 py-0.5 rounded-full">
+                          <span className="text-xs bg-rose-200 text-rose-900 font-semibold px-2 py-0.5 rounded-full">
                             PRIORITÄT
                           </span>
                         </div>
@@ -539,7 +536,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         <div className="flex items-center space-x-2 pt-1">
                           <button
                             onClick={() => handleRespondToEmergency(pendingEmergencyReq.cycle_id, 'ACCEPT')}
-                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-1"
+                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center space-x-1"
                           >
                             <Check className="w-3.5 h-3.5" />
                             <span>Ja, ich springe ein</span>
@@ -554,7 +551,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="bg-slate-50 border border-slate-300 rounded-2xl p-4 shadow-2xs space-y-3">
+                      <div className="bg-slate-50 border border-slate-300 rounded-2xl p-4 space-y-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center space-x-2">
                             <div className="p-1.5 bg-slate-600 text-white rounded-lg">
@@ -562,14 +559,14 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                             </div>
                             <div>
                               <div className="text-xs font-bold text-slate-800">
-                                💬 Vertretungsanfrage (Standard)
+                                Vertretungsanfrage (Standard)
                               </div>
-                              <div className="text-[10px] text-slate-500 font-semibold">
+                              <div className="text-xs text-slate-500 font-semibold">
                                 ArbZG § 3 & § 5 geprüft ✓
                               </div>
                             </div>
                           </div>
-                          <span className="text-[10px] bg-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">
+                          <span className="text-xs bg-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">
                             Regulär
                           </span>
                         </div>
@@ -581,7 +578,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         <div className="flex items-center space-x-2 pt-1">
                           <button
                             onClick={() => handleRespondToEmergency(pendingEmergencyReq.cycle_id, 'ACCEPT')}
-                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-1"
+                            className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition-colors flex items-center justify-center space-x-1"
                           >
                             <Check className="w-3.5 h-3.5" />
                             <span>Ja, ich übernehme</span>
@@ -600,12 +597,12 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 )}
 
                 {/* Shift Card */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
                       Heutiger Dienst • {format(new Date(), 'EEEE', { locale: de })}
                     </span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
                       Schlüssel: 1:6.2 (Grün)
                     </span>
                   </div>
@@ -613,7 +610,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   {todayShift ? (
                     <div>
                       <div className="flex items-center justify-between">
-                        <span className="text-xl font-extrabold text-slate-900">
+                        <span className="text-xl font-semibold text-slate-900">
                           {todayShift.start_time} - {todayShift.end_time} Uhr
                         </span>
                         <span className="text-xs font-semibold px-2 py-0.5 rounded-lg bg-amber-100 text-amber-900">
@@ -626,14 +623,14 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
                       {/* Co-workers */}
                       <div className="mt-3 pt-3 border-t border-slate-100">
-                        <div className="text-[11px] font-bold text-slate-500 mb-1.5">
+                        <div className="text-xs font-bold text-slate-500 mb-1.5">
                           Mit dir im Gruppendienst:
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {coWorkersToday.map((cw) => (
                             <span
                               key={cw.id}
-                              className="inline-flex items-center space-x-1 px-2 py-0.5 bg-slate-100 rounded-md text-[10px] font-semibold text-slate-700"
+                              className="inline-flex items-center space-x-1 px-2 py-0.5 bg-slate-100 rounded-md text-xs font-semibold text-slate-700"
                             >
                               <UserCheck className="w-2.5 h-2.5 text-emerald-600" />
                               <span>{cw.staff_name.split(' ')[0]}</span>
@@ -651,26 +648,26 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 </div>
 
                 {/* Standard-Arbeitszeiten & Verfügbarkeits-Info */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
+                  <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
                     Mein Arbeitszeitprofil
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <div className="text-[10px] text-slate-400 font-bold">REGULÄRE ZEITEN</div>
+                      <div className="text-xs text-slate-400 font-bold">REGULÄRE ZEITEN</div>
                       <div className="font-bold text-slate-800 mt-0.5">
                         {currentUser?.standard_work_hours || 'Flexibel nach Dienstplan'}
                       </div>
                     </div>
                     <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                      <div className="text-[10px] text-slate-400 font-bold">WOCHENSTUNDEN</div>
+                      <div className="text-xs text-slate-400 font-bold">WOCHENSTUNDEN</div>
                       <div className="font-bold text-emerald-700 mt-0.5">
                         {currentUser?.weekly_hours}h / Woche
                       </div>
                     </div>
                   </div>
                   {currentUser?.availability_window && (
-                    <div className="mt-2 text-[11px] text-slate-600 bg-amber-50/60 border border-amber-100 p-2 rounded-xl">
+                    <div className="mt-2 text-xs text-slate-600 bg-amber-50/60 border border-amber-100 p-2 rounded-xl">
                       <span className="font-bold text-amber-900">Verfügbarkeitsrahmen: </span>
                       {currentUser?.availability_window}
                     </div>
@@ -678,13 +675,13 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 </div>
 
                 {/* Group Notes & Allergies */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
                       <span>Kinder-Besonderheiten & Allergien</span>
                     </span>
-                    <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">
+                    <span className="text-xs font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">
                       {groupNotes.length} Notizen
                     </span>
                   </div>
@@ -710,7 +707,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
             {/* TAB 2: ROSTER */}
             {activeTab === 'ROSTER' && (
-              <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+              <div className="bg-white rounded-2xl p-4 border border-slate-200">
                 <div className="text-xs font-bold text-slate-900 mb-3">
                   Mein Dienstplan diese Woche
                 </div>
@@ -726,7 +723,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     >
                       <div>
                         <div className="font-bold text-slate-900">{sh.date}</div>
-                        <div className="text-[11px] text-slate-500">{sh.group_name}</div>
+                        <div className="text-xs text-slate-500">{sh.group_name}</div>
                       </div>
                       <div className="font-bold text-emerald-700">
                         {sh.start_time} - {sh.end_time}
@@ -745,7 +742,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   <div className="flex items-center space-x-1 bg-white p-1 rounded-xl border border-slate-200">
                     <button
                       onClick={() => setChecklistFilter('ALL')}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold ${
+                      className={`px-2 py-1 rounded-lg text-xs font-bold ${
                         checklistFilter === 'ALL' ? 'bg-slate-900 text-white' : 'text-slate-600'
                       }`}
                     >
@@ -753,25 +750,25 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     </button>
                     <button
                       onClick={() => setChecklistFilter('SHARED')}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold ${
+                      className={`px-2 py-1 rounded-lg text-xs font-bold ${
                         checklistFilter === 'SHARED' ? 'bg-emerald-600 text-white' : 'text-slate-600'
                       }`}
                     >
-                      👥 Team
+                      Team
                     </button>
                     <button
                       onClick={() => setChecklistFilter('PRIVATE')}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold ${
+                      className={`px-2 py-1 rounded-lg text-xs font-bold ${
                         checklistFilter === 'PRIVATE' ? 'bg-indigo-600 text-white' : 'text-slate-600'
                       }`}
                     >
-                      🔒 Meine
+                      Meine
                     </button>
                   </div>
 
                   <button
                     onClick={() => setNewChecklistOpen(true)}
-                    className="flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-xl text-[10px] font-bold shadow-xs"
+                    className="flex items-center space-x-1 bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-xl text-xs font-bold"
                   >
                     <Plus className="w-3 h-3" />
                     <span>Neue Liste</span>
@@ -780,7 +777,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
                 {/* Create Modal for Mobile */}
                 {newChecklistOpen && (
-                  <div className="bg-white rounded-2xl p-3.5 border border-emerald-200 shadow-md space-y-2.5 animate-slide-up">
+                  <div className="bg-white rounded-2xl p-3.5 border border-emerald-200 shadow-md space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-900">Neue Checkliste anlegen</span>
                       <button 
@@ -802,7 +799,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
                       {/* Top 3 Favorites Quick Select */}
                       <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-600">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-600">
                           <span className="flex items-center space-x-1">
                             <Star className="w-2.5 h-2.5 fill-amber-500 text-amber-500" />
                             <span>Favoriten (Ersetzt von unten nach oben):</span>
@@ -833,13 +830,13 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                                     if (fav.targetId) setNewChecklistStaffId(fav.targetId);
                                   }
                                 }}
-                                className={`p-1.5 rounded-lg text-left text-[10px] border transition-all ${
+                                className={`p-1.5 rounded-lg text-left text-xs border transition-all ${
                                   isSelected
                                     ? 'bg-emerald-600 text-white border-emerald-600 font-bold'
                                     : 'bg-slate-50 text-slate-700 border-slate-200'
                                 }`}
                               >
-                                <div className="text-[8px] opacity-75">{idx === 2 ? '3 (unten)' : idx === 1 ? '2 (Mitte)' : '1 (oben)'}</div>
+                                <div className="text-xs opacity-75">{idx === 2 ? '3 (unten)' : idx === 1 ? '2 (Mitte)' : '1 (oben)'}</div>
                                 <div className="truncate font-semibold">{fav.label}</div>
                               </button>
                             );
@@ -849,67 +846,67 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
                       {/* Granular Scope Selector */}
                       <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-slate-500 block">Freigeben für:</span>
+                        <span className="text-xs font-bold text-slate-500 block">Freigeben für:</span>
                         <div className="flex flex-wrap gap-1">
                           <button
                             type="button"
                             onClick={() => setNewChecklistScope('ALL')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            className={`px-2 py-0.5 rounded-md text-xs font-bold ${
                               newChecklistScope === 'ALL' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            👥 Gesamt
+                            Gesamt
                           </button>
                           <button
                             type="button"
                             onClick={() => setNewChecklistScope('TODAY_GROUP')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            className={`px-2 py-0.5 rounded-md text-xs font-bold ${
                               newChecklistScope === 'TODAY_GROUP' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            🏫 Heutige Gruppe
+                            Heutige Gruppe
                           </button>
                           <button
                             type="button"
                             onClick={() => setNewChecklistScope('GROUP')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            className={`px-2 py-0.5 rounded-md text-xs font-bold ${
                               newChecklistScope === 'GROUP' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            🏛️ Kindergruppe
+                            Kindergruppe
                           </button>
                           <button
                             type="button"
                             onClick={() => setNewChecklistScope('PERSONS')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            className={`px-2 py-0.5 rounded-md text-xs font-bold ${
                               newChecklistScope === 'PERSONS' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            👤 Person
+                            Person
                           </button>
                           <button
                             type="button"
                             onClick={() => setNewChecklistScope('LEITUNG')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            className={`px-2 py-0.5 rounded-md text-xs font-bold ${
                               newChecklistScope === 'LEITUNG' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            🛡️ Leitung
+                            Leitung
                           </button>
                           <button
                             type="button"
                             onClick={() => setNewChecklistScope('PRIVATE')}
-                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            className={`px-2 py-0.5 rounded-md text-xs font-bold ${
                               newChecklistScope === 'PRIVATE' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600'
                             }`}
                           >
-                            🔒 Privat
+                            Privat
                           </button>
                         </div>
 
                         {newChecklistScope === 'TODAY_GROUP' && (
-                          <p className="text-[9px] text-blue-600 bg-blue-50 p-1.5 rounded-md">
-                            ℹ️ Bleibt bei der Gruppe immer – wird allen angezeigt, die heute in dieser Gruppe arbeiten. Dem Ersteller aber immer!
+                          <p className="text-xs text-blue-600 bg-blue-50 p-1.5 rounded-md">
+                            Bleibt bei der Gruppe immer – wird allen angezeigt, die heute in dieser Gruppe arbeiten. Dem Ersteller aber immer!
                           </p>
                         )}
 
@@ -918,20 +915,18 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                             <select
                               value={newChecklistGroup}
                               onChange={(e) => setNewChecklistGroup(e.target.value)}
-                              className="text-[10px] bg-slate-50 border border-slate-200 rounded-lg p-1 flex-1 text-slate-800"
+                              className="text-xs bg-slate-50 border border-slate-200 rounded-lg p-1 flex-1 text-slate-800"
                             >
-                              <option value="g_u3_maeuse">Mäusegruppe (U3)</option>
-                              <option value="g_ue3_sonne">Sonnengruppe (Ü3)</option>
-                              <option value="g_ue3_wald">Regenbogengruppe (Hort)</option>
+                              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                             </select>
                             <button
                               type="button"
                               onClick={() => handleMobilePinFavorite({
                                 type: 'GROUP',
-                                label: newChecklistGroup === 'g_u3_maeuse' ? 'Mäusegruppe' : 'Sonnengruppe',
+                                label: groups.find(g => g.id === newChecklistGroup)?.name ?? '',
                                 targetId: newChecklistGroup
                               })}
-                              className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-1 rounded border border-amber-200"
+                              className="text-xs bg-amber-50 text-amber-700 px-1.5 py-1 rounded border border-amber-200"
                               title="Zu Favoriten hinzufügen"
                             >
                               ⭐ Pin
@@ -944,7 +939,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                             <select
                               value={newChecklistStaffId}
                               onChange={(e) => setNewChecklistStaffId(e.target.value)}
-                              className="text-[10px] bg-slate-50 border border-slate-200 rounded-lg p-1 flex-1 text-slate-800"
+                              className="text-xs bg-slate-50 border border-slate-200 rounded-lg p-1 flex-1 text-slate-800"
                             >
                               <option value="">Kollegen wählen...</option>
                               {staffList.filter(s => s.id !== currentStaffId).map(s => (
@@ -958,7 +953,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                                   const s = staffList.find(st => st.id === newChecklistStaffId);
                                   if (s) handleMobilePinFavorite({ type: 'PERSON', label: s.name, targetId: s.id });
                                 }}
-                                className="text-[9px] bg-amber-50 text-amber-700 px-1.5 py-1 rounded border border-amber-200"
+                                className="text-xs bg-amber-50 text-amber-700 px-1.5 py-1 rounded border border-amber-200"
                                 title="Zu Favoriten hinzufügen"
                               >
                                 ⭐ Pin
@@ -970,7 +965,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
                       {/* Item inputs */}
                       <div className="space-y-1.5">
-                        <span className="text-[10px] font-bold text-slate-500 block">Aufgaben:</span>
+                        <span className="text-xs font-bold text-slate-500 block">Aufgaben:</span>
                         {newChecklistItems.map((it, idx) => (
                           <div key={idx} className="flex items-center space-x-1">
                             <input
@@ -982,7 +977,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                                 upd[idx] = e.target.value;
                                 setNewChecklistItems(upd);
                               }}
-                              className="flex-1 text-[11px] bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 outline-none"
+                              className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-800 outline-none"
                             />
                             {newChecklistItems.length > 1 && (
                               <button
@@ -998,7 +993,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         <button
                           type="button"
                           onClick={() => setNewChecklistItems([...newChecklistItems, ''])}
-                          className="text-[10px] text-emerald-600 font-bold hover:underline"
+                          className="text-xs text-emerald-600 font-bold hover:underline"
                         >
                           + Punkt hinzufügen
                         </button>
@@ -1008,13 +1003,13 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         <button
                           type="button"
                           onClick={() => setNewChecklistOpen(false)}
-                          className="px-2.5 py-1 text-[11px] text-slate-500 font-semibold"
+                          className="px-2.5 py-1 text-xs text-slate-500 font-semibold"
                         >
                           Abbrechen
                         </button>
                         <button
                           type="submit"
-                          className="px-3 py-1 bg-emerald-600 text-white text-[11px] font-bold rounded-lg"
+                          className="px-3 py-1 bg-emerald-600 text-white text-xs font-bold rounded-lg"
                         >
                           Erstellen
                         </button>
@@ -1038,7 +1033,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     return (
                       <div 
                         key={c.id}
-                        className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden"
+                        className="bg-white rounded-2xl border border-slate-200 overflow-hidden"
                       >
                         {/* Header */}
                         <div 
@@ -1047,12 +1042,12 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center space-x-1.5 mb-1">
-                              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-slate-100 text-slate-700">
+                              <span className="text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
                                 {c.category}
                               </span>
                               <button
                                 onClick={() => handleMobileToggleSharing(c)}
-                                className={`text-[9px] font-bold px-1.5 py-0.2 rounded flex items-center space-x-0.5 ${
+                                className={`text-xs font-bold px-1.5 py-0.5 rounded flex items-center space-x-0.5 ${
                                   !c.is_shared || c.share_scope === 'PRIVATE'
                                     ? 'bg-slate-100 text-slate-600'
                                     : c.share_scope === 'TODAY_GROUP'
@@ -1100,9 +1095,9 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                               </button>
                             </div>
                             <h4 className="font-bold text-xs text-slate-900 leading-tight">{c.title}</h4>
-                            <p className="text-[10px] text-slate-400 mt-0.5">von {c.created_by_name.split(' ')[0]}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">von {c.created_by_name.split(' ')[0]}</p>
                           </div>
-                          <span className="text-[11px] font-bold text-slate-600 font-mono">
+                          <span className="text-xs font-bold text-slate-600 font-mono">
                             {completed}/{total}
                           </span>
                         </div>
@@ -1134,7 +1129,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                               <div className="flex-1 min-w-0">
                                 <p className="leading-snug">{it.text}</p>
                                 {it.done && it.completed_by && (
-                                  <span className="text-[9px] text-emerald-700 block mt-0.5 no-underline">
+                                  <span className="text-xs text-emerald-700 block mt-0.5 no-underline">
                                     ✓ {it.completed_by.split(' ')[0]}
                                   </span>
                                 )}
@@ -1156,12 +1151,12 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                                 handleMobileAddInlineItem(c.id);
                               }
                             }}
-                            className="flex-1 text-[11px] bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-800 outline-none"
+                            className="flex-1 text-xs bg-white border border-slate-200 rounded-lg px-2 py-1 text-slate-800 outline-none"
                           />
                           <button
                             onClick={() => handleMobileAddInlineItem(c.id)}
                             disabled={!newInlineItem[c.id]?.trim()}
-                            className="px-2 py-1 bg-slate-800 disabled:bg-slate-300 text-white text-[10px] font-bold rounded-lg"
+                            className="px-2 py-1 bg-slate-800 disabled:bg-slate-300 text-white text-xs font-bold rounded-lg"
                           >
                             +
                           </button>
@@ -1176,17 +1171,17 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
             {activeTab === 'SWAP' && (
               <div className="space-y-3.5">
                 {/* 1. Krankmeldung einreichen (Akut) */}
-                <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200 shadow-xs">
+                <div className="bg-rose-50/70 rounded-2xl p-4 border border-rose-200">
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-bold text-xs text-rose-950 flex items-center space-x-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
                       <span>Krankmeldung einreichen (Akut)</span>
                     </h4>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-900">
-                      🚨 Sofort-Meldung
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-900">
+                      Sofort-Meldung
                     </span>
                   </div>
-                  <p className="text-[11px] text-rose-800 mb-3 leading-relaxed">
+                  <p className="text-xs text-rose-800 mb-3 leading-relaxed">
                     Meldet dich unverzüglich bei der Leitung ab. Löst bei der Einrichtungsleitung sofort eine Benachrichtigung aus (gemäß der Leitungs-Einstellung: Notfall-Alarm oder Standard-Info).
                   </p>
 
@@ -1199,14 +1194,14 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   <button
                     onClick={handleSendSickNotice}
                     disabled={sickSubmitting}
-                    className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
+                    className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-bold text-xs rounded-xl transition-all active:scale-95 flex items-center justify-center space-x-1.5 cursor-pointer"
                   >
                     <AlertTriangle className="w-3.5 h-3.5" />
                     <span>{sickSubmitting ? 'Wird übertragen...' : 'Krankmeldung für heute abschicken'}</span>
                   </button>
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
                   <h4 className="font-bold text-xs text-slate-900 mb-2 flex items-center space-x-1.5">
                     <ArrowRightLeft className="w-3.5 h-3.5 text-blue-600" />
                     <span>Schicht abgeben / Kollegen anfragen</span>
@@ -1256,7 +1251,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   </form>
                 </div>
 
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
                   <h4 className="font-bold text-xs text-slate-900 mb-2 flex items-center space-x-1.5">
                     <Palmtree className="w-3.5 h-3.5 text-emerald-600" />
                     <span>Urlaub beantragen</span>
@@ -1287,7 +1282,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 </div>
 
                 {/* 3. Wunschdienst einreichen (Competitor Best Practice) */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
                   <h4 className="font-bold text-xs text-slate-900 mb-2 flex items-center space-x-1.5">
                     <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
                     <span>Wunschdienst / Verfügbarkeit hinterlegen</span>
@@ -1302,7 +1297,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                   <form onSubmit={handleSendWish} className="space-y-2.5">
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] text-slate-500 mb-0.5">Datum</label>
+                        <label className="block text-xs text-slate-500 mb-0.5">Datum</label>
                         <input
                           type="date"
                           value={wishDate}
@@ -1311,15 +1306,15 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-slate-500 mb-0.5">Schichtwunsch</label>
+                        <label className="block text-xs text-slate-500 mb-0.5">Schichtwunsch</label>
                         <select
                           value={wishType}
                           onChange={(e) => setWishType(e.target.value as any)}
                           className="w-full text-xs p-2 border border-slate-300 rounded-xl bg-white"
                         >
-                          <option value="WUNSCH_FRUEH">🌅 Frühdienst (ab 07:00)</option>
-                          <option value="WUNSCH_SPAET">🌇 Spätdienst (bis 17:00)</option>
-                          <option value="WUNSCH_FREI">🚫 Wunschfrei / Zeitausgleich</option>
+                          <option value="WUNSCH_FRUEH">Frühdienst (ab 07:00)</option>
+                          <option value="WUNSCH_SPAET">Spätdienst (bis 17:00)</option>
+                          <option value="WUNSCH_FREI">Wunschfrei / Zeitausgleich</option>
                         </select>
                       </div>
                     </div>
@@ -1336,7 +1331,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
 
                     <button
                       type="submit"
-                      className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs transition-all active:scale-95"
+                      className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl transition-all active:scale-95"
                     >
                       Schichtwunsch für Leitung hinterlegen
                     </button>
@@ -1353,8 +1348,8 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     <Bell className="w-4 h-4 text-indigo-600" />
                     <span>Änderungen durch die Leitung</span>
                   </div>
-                  <p className="text-[11px] text-indigo-700 mt-1">
-                    Hier siehst du alle Schichtanpassungen, Überstundengutschriften und Vertragsänderungen von Sabine Weber.
+                  <p className="text-xs text-indigo-700 mt-1">
+                    Hier siehst du alle Schichtanpassungen, Überstundengutschriften und Vertragsänderungen der Leitung.
                   </p>
                 </div>
 
@@ -1367,16 +1362,16 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                     auditLogs.map((log) => (
                       <div
                         key={log.id}
-                        className="p-3 bg-white rounded-2xl border border-slate-200 shadow-xs text-xs space-y-1"
+                        className="p-3 bg-white rounded-2xl border border-slate-200 text-xs space-y-1"
                       >
                         <div className="flex items-center justify-between font-bold text-slate-900">
                           <span className="text-indigo-950 font-bold">{log.title}</span>
-                          <span className="text-[10px] text-slate-400 font-normal">
+                          <span className="text-xs text-slate-400 font-normal">
                             {new Date(log.created_at).toLocaleDateString('de-DE')}
                           </span>
                         </div>
-                        <p className="text-slate-600 text-[11px]">{log.description}</p>
-                        <div className="text-[10px] text-slate-400 font-medium pt-0.5">
+                        <p className="text-slate-600 text-xs">{log.description}</p>
+                        <div className="text-xs text-slate-400 font-medium pt-0.5">
                           Eingetragen von: {log.changed_by}
                         </div>
                       </div>
@@ -1391,72 +1386,72 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
               <div className="space-y-3.5">
                 {/* Stats Cards */}
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-                    <div className="text-[10px] font-bold text-slate-400">WOCHENSTUNDEN</div>
-                    <div className="text-xl font-black text-emerald-600 mt-1">
+                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200">
+                    <div className="text-xs font-bold text-slate-400">WOCHENSTUNDEN</div>
+                    <div className="text-xl font-semibold text-emerald-600 mt-1">
                       {currentUser?.weekly_hours}h
                     </div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">
+                    <div className="text-xs text-slate-400 mt-0.5">
                       {currentUser?.standard_work_hours ? `Regulär: ${currentUser.standard_work_hours}` : 'Flexibel nach Dienstplan'}
                     </div>
                   </div>
-                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-                    <div className="text-[10px] font-bold text-slate-400">RESTURLAUB 2026</div>
-                    <div className="text-xl font-black text-slate-900 mt-1">
-                      {staffStats?.remaining_vacation_days || 24} Tage
+                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200">
+                    <div className="text-xs font-bold text-slate-400">RESTURLAUB 2026</div>
+                    <div className="text-xl font-semibold text-slate-900 mt-1">
+                      {staffStats?.remaining_vacation_days ?? '–'} Tage
                     </div>
-                    <div className="text-[9px] text-slate-400 mt-0.5">
-                      von {staffStats?.total_vacation_days || 30} Tagen gesamt
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      von {staffStats?.total_vacation_days ?? '–'} Tagen gesamt
                     </div>
                   </div>
                 </div>
 
                 {/* Verfügbarkeitsrahmen */}
                 {currentUser?.availability_window && (
-                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-                    <div className="text-[10px] font-bold text-slate-400">MEIN VERFÜGBARKEITSRAHMEN</div>
+                  <div className="bg-white p-3.5 rounded-2xl border border-slate-200">
+                    <div className="text-xs font-bold text-slate-400">MEIN VERFÜGBARKEITSRAHMEN</div>
                     <div className="text-xs font-semibold text-slate-800 mt-1">
                       {currentUser.availability_window}
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
+                    <div className="text-xs text-slate-400 mt-0.5">
                       Wird von der Leitung bei der Schichteinteilung berücksichtigt
                     </div>
                   </div>
                 )}
 
                 {/* Account & Login (admin / admin) */}
-                <div className="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-3.5 border border-slate-200">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-900">
                       <Key className="w-4 h-4 text-emerald-600" />
                       <span>Login & Zugangsdaten</span>
                     </div>
-                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
+                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
                       admin / admin
                     </span>
                   </div>
                   <div className="text-xs text-slate-600 mb-2">
                     Benutzer: <strong className="font-mono text-slate-800">{currentUser?.username || 'admin'}</strong> • Status: <span className="text-emerald-700 font-semibold">{currentUser?.password_changed ? 'Individuelles Passwort' : 'Standard (admin / admin)'}</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-[11px] text-slate-500">
+                  <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-500">
                     Accounts werden über die Leitungs-Seite eingerichtet und starten standardmäßig mit <strong className="font-mono text-slate-700">admin / admin</strong>.
                   </div>
                 </div>
 
                 {/* Kritische Benachrichtigungen (Alarm-Modus) */}
-                <div className="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-3.5 border border-slate-200">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center space-x-1.5 text-xs font-bold text-slate-900">
                       <Bell className="w-4 h-4 text-emerald-600" />
                       <span>Kritische Benachrichtigungen</span>
                     </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
                       userAlertsMode === 'CRITICAL' ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-slate-100 text-slate-700'
                     }`}>
-                      {userAlertsMode === 'CRITICAL' ? '🚨 Kritisch (Alarm)' : '💬 Einfach (Info)'}
+                      {userAlertsMode === 'CRITICAL' ? 'Kritisch (Alarm)' : 'Einfach (Info)'}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-600 mb-2.5 leading-relaxed">
+                  <p className="text-xs text-slate-600 mb-2.5 leading-relaxed">
                     Entscheide selbst, wie spontane Einspring-Anfragen bei Personalausfall bei dir signalisiert werden:
                   </p>
                   <div className="grid grid-cols-2 gap-2">
@@ -1469,10 +1464,10 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <div className="font-bold text-[11px] flex items-center space-x-1">
-                        <span>🚨 Kritisch</span>
+                      <div className="font-bold text-xs flex items-center space-x-1">
+                        <span>Kritisch</span>
                       </div>
-                      <div className="text-[9px] text-slate-500 mt-0.5 leading-snug">
+                      <div className="text-xs text-slate-500 mt-0.5 leading-snug">
                         Notfall-Alarm & rotes Banner
                       </div>
                     </button>
@@ -1485,10 +1480,10 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                           : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
                       }`}
                     >
-                      <div className="font-bold text-[11px] flex items-center space-x-1">
-                        <span>💬 Einfach</span>
+                      <div className="font-bold text-xs flex items-center space-x-1">
+                        <span>Einfach</span>
                       </div>
-                      <div className="text-[9px] text-slate-500 mt-0.5 leading-snug">
+                      <div className="text-xs text-slate-500 mt-0.5 leading-snug">
                         Standard-Nachricht ohne Alarm
                       </div>
                     </button>
@@ -1496,7 +1491,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                 </div>
 
                 {/* Pinnwand */}
-                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200">
                   <div className="text-xs font-bold text-slate-900 mb-3 flex items-center space-x-1.5">
                     <Megaphone className="w-4 h-4 text-blue-600" />
                     <span>Kita-Pinnwand (Aushänge)</span>
@@ -1512,7 +1507,7 @@ export const MobileAppView: React.FC<MobileAppViewProps> = ({
                       >
                         <div className="font-bold text-slate-900">{ann.title}</div>
                         <div className="text-slate-600 mt-1">{ann.content}</div>
-                        <div className="text-[10px] text-slate-400 mt-1.5 flex justify-between">
+                        <div className="text-xs text-slate-400 mt-1.5 flex justify-between">
                           <span>{ann.author}</span>
                           <span>{ann.date}</span>
                         </div>
