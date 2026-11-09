@@ -26,7 +26,7 @@ Eine neue Datenbank startet leer mit dem Konto `admin` / `admin` (Leitung). Demo
 
 ## Windows
 
-`install.bat` ist einzeln verschickbar und installiert alles nach `%USERPROFILE%\KitaPlaner`, inklusive eigenem Node.js. Danach startet `start_windows.bat` das System, `update.bat` aktualisiert es.
+`install_Vxx.bat` ist einzeln verschickbar und installiert alles nach `%USERPROFILE%\KitaPlaner`, inklusive eigenem Node.js. Danach startet `start_windows.bat` das System, `update.bat` aktualisiert es.
 
 Jedes Update sichert das System vorher nach `backups/update_*` und rollt bei Fehlern oder verlorenen Daten automatisch zurück. Der Server sichert die Datenbank 1 Minute nach jedem Start. Sicherungen werden nach 1 Jahr gelöscht.
 

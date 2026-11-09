@@ -13,12 +13,13 @@ const TMP = path.join(ROOT, '.update_tmp');
 const PROBE_PORT = 3199;
 const DB_FILES = ['kita.sqlite', 'kita.sqlite-wal', 'kita.sqlite-shm'];
 const NOT_BACKED_UP = new Set(['node_modules', 'node', 'backups', '.update_tmp']);
-const NOT_SHIPPED = new Set([...NOT_BACKED_UP, 'logs', 'kita_mobile', 'test_backend_full.js', 'install.bat', '.claude']);
+const NOT_SHIPPED = new Set([...NOT_BACKED_UP, 'logs', 'kita_mobile', 'test_backend_full.js', '.claude']);
 // Der Start leert group_hourly_children bewusst (Migration), notification_queue ändert sich im Betrieb.
 const MAY_SHRINK = new Set(['group_hourly_children', 'notification_queue']);
 
 const copy = (from, to, options) => fs.cpSync(from, to, { recursive: true, ...options });
-const remove = (target) => fs.rmSync(target, { recursive: true, force: true });
+// Wiederholen, weil Virenscanner frische Dateien unter Windows kurz sperren.
+const remove = (target) => fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function run(command, args, options) {
@@ -67,11 +68,9 @@ async function probeNewVersion() {
 
 function createBackup() {
   const target = path.join(ROOT, 'backups', `update_${new Date().toISOString().replace(/[:.]/g, '-')}`);
-  const partial = `${target}.partial`;
   for (const name of fs.readdirSync(ROOT)) {
-    if (!NOT_BACKED_UP.has(name)) copy(path.join(ROOT, name), path.join(partial, name));
+    if (!NOT_BACKED_UP.has(name)) copy(path.join(ROOT, name), path.join(target, name));
   }
-  fs.renameSync(partial, target);
   console.log(`Backup gespeichert: ${target}`);
   return target;
 }
@@ -104,7 +103,7 @@ async function main() {
 
   const isUpdate = fs.existsSync(path.join(ROOT, 'kita.sqlite'));
   const backup = isUpdate ? createBackup() : null;
-  const shipped = fs.readdirSync(release).filter((name) => !NOT_SHIPPED.has(name) && !DB_FILES.includes(name) && !name.startsWith('.env'));
+  const shipped = fs.readdirSync(release).filter((name) => !NOT_SHIPPED.has(name) && !DB_FILES.includes(name) && !name.startsWith('.env') && !/^install_V\d+\.bat$/.test(name));
 
   try {
     for (const name of shipped) {
