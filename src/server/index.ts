@@ -5782,7 +5782,6 @@ const runAutoBackup = () => createBackup().then(
   (err) => console.error('Automatisches Backup fehlgeschlagen:', err)
 );
 setTimeout(runAutoBackup, 60 * 1000);
-setInterval(runAutoBackup, 60 * 60 * 1000);
 
 // Graceful Shutdown on SIGTERM and SIGINT
 const gracefulShutdown = (signal: string) => {
